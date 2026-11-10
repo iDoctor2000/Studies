@@ -39,8 +39,8 @@ para añadir, quitar o traducir un campo se edita el Excel, no el código.
 ## 4. Importación de informes
 
 1. Anonimización **en el navegador**, antes de enviar nada al servidor: quitar cabecera,
-   nombres, CIP, NHC, DNI, teléfonos, direcciones. Vista previa obligatoria.
-2. Extracción: reglas locales + (opcional, si lo aprueba el CEIm) API de Claude con el texto ya anonimizado.
+   nombres, CIP, NHC, DNI, teléfonos, direcciones. Vista previa obligatoria. El informe no se guarda.
+2. Extracción por reglas locales (sin IA externa ni internet).
 3. Revisión humana campo a campo antes de guardar.
 
 ## Datos de prueba
