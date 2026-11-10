@@ -502,3 +502,28 @@ textarea.inp { width: 100%; height: auto; min-height: 76px; padding: 10px 12px; 
 .latido-logo { width: 64px; height: 64px; color: var(--brand-2); animation: pulso 1.2s ease-in-out infinite; }
 @keyframes pulso { 50% { transform: scale(1.12); opacity: .7; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } .ecg path, .ecg-fondo path { stroke-dashoffset: 0 !important; } }
+
+/* ---------- Modo navegador ---------- */
+.estado-carpeta { display: flex; gap: 10px; align-items: center; text-align: left; width: 100%; padding: 10px 12px; border-radius: 12px; cursor: pointer;
+  background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .08); color: var(--side-ink); transition: background .15s; }
+.estado-carpeta:hover { background: rgba(255, 255, 255, .1); }
+.estado-carpeta .ico { width: 20px; height: 20px; }
+.estado-carpeta b { display: block; font-size: 13px; color: #fff; }
+.estado-carpeta small { display: block; font-size: 11.5px; color: var(--side-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px; }
+.estado-carpeta.ok .ico { color: #34d399; }
+.estado-carpeta.aviso { border-color: rgba(251, 191, 36, .4); } .estado-carpeta.aviso .ico { color: #fbbf24; }
+.estado-carpeta.mal { border-color: rgba(248, 113, 113, .45); background: rgba(248, 113, 113, .1); } .estado-carpeta.mal .ico { color: #f87171; }
+.roles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.rol { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 14px; border-radius: 14px; border: 1.5px solid var(--line-2); background: var(--surface); cursor: pointer; text-align: left; transition: all .15s; }
+.rol .ico { color: var(--ink-3); margin-bottom: 4px; }
+.rol b { font-size: 14px; } .rol span { font-size: 12.5px; color: var(--ink-3); }
+.rol.on { border-color: var(--brand-2); box-shadow: 0 0 0 4px color-mix(in srgb, var(--brand-2) 15%, transparent); }
+.rol.on .ico { color: var(--brand); }
+.carpeta-cta { display: flex; gap: 18px; align-items: flex-start; }
+.carpeta-cta .ic-gr { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; flex: none; background: var(--warn-soft); color: var(--warn); }
+.carpeta-cta.ok .ic-gr { background: var(--ok-soft); color: var(--ok); }
+.carpeta-cta .ic-gr .ico { width: 28px; height: 28px; }
+.carpeta-cta h3 { font-size: 17px; margin-bottom: 6px; }
+.carpeta-cta p { margin: 0 0 14px; }
+.pasos-guia { margin: 10px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; color: var(--ink-2); font-size: 14px; }
+.pasos-guia code, .carpeta-cta code, .aviso-local code { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); color: var(--ink); }

@@ -2,6 +2,7 @@
 import { icono, ENFERMEDADES, PRINCIPALES } from "./iconos.js";
 import { construirModelo, pestanasDelCaso, progresoPestana, progresoCaso, progresoItems, rellenarNo, visible } from "./modelo.js";
 import { anonimizar, extraer, EJEMPLO } from "./importador.js";
+import * as L from "./local.js";
 
 // ===========================================================================
 //  Utilidades
@@ -10,11 +11,13 @@ const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const pad = (n) => String(n).padStart(4, "0");
-const S = { info: null, yo: null, modelo: null, casos: [] };
+const S = { info: null, yo: null, modelo: null, casos: [], modo: "servidor" };
+const navegador = () => S.modo === "navegador";
 const E = { caso: null, tab: null, pend: {}, origen: null, timer: null, guardando: false };
 
 async function api(metodo, url, cuerpo, opts = {}) {
-  const r = await fetch("/api/" + url, {
+  if (navegador()) return L.apiLocal(metodo, url, cuerpo ? JSON.parse(JSON.stringify(cuerpo)) : undefined);
+  const r = await fetch("api/" + url, {
     method: metodo, credentials: "same-origin", keepalive: !!opts.keepalive,
     headers: cuerpo ? { "Content-Type": "application/json" } : {},
     body: cuerpo ? JSON.stringify(cuerpo) : undefined,
@@ -87,14 +90,27 @@ const esDM = () => S.yo?.rol === "dm";
 // ===========================================================================
 //  Arranque y enrutado
 // ===========================================================================
+async function detectarModo() {
+  if (window.WILLEM_MODO === "navegador" || location.protocol === "file:") return "navegador";
+  try {
+    const r = await fetch("api/estado", { credentials: "same-origin" });
+    const d = await r.json();
+    if (d && d.centro) return "servidor";
+  } catch { /* sin servidor */ }
+  return "navegador";
+}
+
 async function arrancar() {
   aplicarTema();
+  S.modo = await detectarModo();
+  document.body.dataset.modo = S.modo;
   try {
     S.info = await api("GET", "estado");
   } catch (e) {
-    $("#raiz").innerHTML = `<div class="vacio">${icono("aviso")}<p>No se puede conectar con el servidor local.<br>¿Está abierta la ventana del servidor?</p></div>`;
+    $("#raiz").innerHTML = `<div class="vacio">${icono("aviso")}<p>No se puede abrir la aplicación: ${esc(e.message)}</p></div>`;
     return;
   }
+  if (navegador() && !S.info.usuario) return pintarPerfil();
   if (S.info.necesita_configuracion) return pintarConfiguracion();
   if (!S.info.usuario) return pintarLogin();
   S.yo = S.info.usuario;
@@ -129,6 +145,8 @@ async function enrutar() {
     else if (pag === "exportar" && esDM()) await pExportar();
     else if (pag === "usuarios" && esDM()) await pUsuarios();
     else if (pag === "diccionario") await pDiccionario();
+    else if (pag === "carpeta" && navegador()) await pCarpeta();
+    else if (pag === "unir" && navegador() && esDM()) await pUnir();
     else location.hash = "#/panel";
   } catch (e) {
     c.innerHTML = `<div class="vacio">${icono("aviso")}<p>${esc(e.message)}</p></div>`;
@@ -245,22 +263,33 @@ function pintarEstructura() {
         <a href="#/diccionario" data-pag="diccionario">${icono("libro")} Diccionario</a>
         ${dm ? `<div class="titulo">Data manager</div>
         <a href="#/llave" data-pag="llave">${icono("llave")} Libro llave</a>
+        ${navegador() ? `<a href="#/unir" data-pag="unir">${icono("unir")} Unir casos</a>` : ""}
         <a href="#/exportar" data-pag="exportar">${icono("exportar")} Exportar</a>
-        <a href="#/usuarios" data-pag="usuarios">${icono("usuarios")} Usuarios</a>` : ""}
+        ${navegador() ? "" : `<a href="#/usuarios" data-pag="usuarios">${icono("usuarios")} Usuarios</a>`}` : ""}
+        ${navegador() ? `<div class="titulo">Guardado</div><a href="#/carpeta" data-pag="carpeta">${icono("nube")} Carpeta compartida</a>` : ""}
       </nav>
       <div class="pie-lateral">
         ${S.info.demo ? `<div class="cinta-demo">MODO DEMOSTRACIÓN · datos ficticios</div>` : ""}
-        <div class="local-ok">${icono("candado")} Funcionando en local · sin internet</div>
+        ${navegador() ? `<button class="estado-carpeta" id="estCarpeta"></button>` : `<div class="local-ok">${icono("candado")} Funcionando en local · sin internet</div>`}
         <div class="tarjeta-usuario">
           <div class="avatar" style="background:${colorDe(S.yo.usuario)}">${esc(iniciales(S.yo.nombre))}</div>
           <div style="min-width:0"><div class="n">${esc(S.yo.nombre)}</div><div class="r">${dm ? "Data manager" : "Introducción de datos"}</div></div>
-          <button id="btnSalir" title="Cerrar sesión">${icono("salir")}</button>
+          <button id="btnSalir" title="${navegador() ? "Cambiar de usuario" : "Cerrar sesión"}">${icono("salir")}</button>
         </div>
       </div>
     </aside>
     <main class="principal"><header class="barra" id="barra"></header><section class="contenido" id="contenido"></section></main>
   </div>`;
-  $("#btnSalir").onclick = async () => { await vaciarPendientes(); await api("POST", "logout"); S.yo = null; location.hash = ""; pintarLogin(); };
+  $("#btnSalir").onclick = async () => {
+    await vaciarPendientes();
+    if (navegador()) {
+      const ok = await modal({ titulo: "Cambiar de usuario", aceptar: "Cambiar", html: `<p>Los casos <b>no se borran</b>: siguen guardados en este navegador y en la carpeta compartida.</p><p class="sub">Use esto solo si otra persona va a trabajar en este mismo ordenador.</p>` });
+      if (!ok) return;
+      await api("POST", "logout"); S.yo = null; location.hash = ""; return pintarPerfil();
+    }
+    await api("POST", "logout"); S.yo = null; location.hash = ""; pintarLogin();
+  };
+  if (navegador()) { L.alCambiarEstado(pintarEstadoCarpeta); pintarEstadoCarpeta(); }
   window.addEventListener("scroll", () => $("#barra")?.classList.toggle("sombra", scrollY > 4), { passive: true });
 }
 
@@ -403,7 +432,8 @@ async function pCasos(qs) {
 // ===========================================================================
 async function pNuevo(qs) {
   barra("Nuevo caso", "Casos ›");
-  const W = { paso: 1, numero: +qs.get("n") || (await api("GET", "siguiente")).numero, principal: null, sec: [] };
+  const proponer = !navegador() || esDM();
+  const W = { paso: 1, numero: +qs.get("n") || (proponer ? (await api("GET", "siguiente")).numero : ""), principal: null, sec: [] };
   const cont = $("#contenido");
   const pintar = () => {
     const pasos = ["Número de caso", "Enfermedad principal", "Otros diagnósticos"];
@@ -412,7 +442,7 @@ async function pNuevo(qs) {
       cuerpo = `<div class="tarjeta pad" style="max-width:760px">
         <h3>¿Qué número tiene este caso?</h3>
         <div class="sub" style="margin-bottom:18px">Es el número seudonimizado que asigna el data manager en el <b>libro llave</b>. Nunca escriba aquí el CIP, CARM, NHC ni el nombre del paciente.</div>
-        <div class="campo-num"><input id="num" value="${pad(W.numero)}" inputmode="numeric" maxlength="6"><div class="sub">Propuesto: el siguiente libre.${esDM() ? `<br><a href="#/llave">${icono("llave")} Asignarlo desde el libro llave</a>` : ""}</div></div>
+        <div class="campo-num"><input id="num" value="${W.numero ? pad(W.numero) : ""}" placeholder="0000" inputmode="numeric" maxlength="6"><div class="sub">${W.numero ? "Propuesto: el siguiente libre." : "Escriba el número que le ha dado el data manager."}${esDM() ? `<br><a href="#/llave">${icono("llave")} Asignarlo desde el libro llave</a>` : ""}</div></div>
         <div class="nav-sec"><span></span><button class="btn primario grande" id="sig">Continuar ${icono("flechaD")}</button></div></div>`;
     } else if (W.paso === 2) {
       cuerpo = `<div class="sub" style="margin-bottom:14px">El formulario se adapta a la enfermedad principal: solo verá los campos que le corresponden.</div>
@@ -875,7 +905,10 @@ async function pLlave() {
   const pintar = async (asignado) => {
     const d = await api("GET", "llave" + (q ? "?q=" + encodeURIComponent(q) : ""));
     const cab = `<div class="llave-cab"><div class="ic-grande">${icono("llave")}</div><div><h2>Correspondencia nº de caso ↔ paciente</h2>
-      <p>Este archivo es lo único que permite saber quién es cada caso. Se guarda <b>aparte</b> de la base del registro, idealmente en un USB cifrado que solo tienen los data managers. Nunca se exporta.</p></div></div>`;
+      <p>${d.local ? "Se guarda <b>solo en este navegador</b>, nunca en la carpeta compartida. Haga copias con el botón de abajo en un sitio privado (USB cifrado o carpeta personal de data manager)."
+        : "Este archivo es lo único que permite saber quién es cada caso. Se guarda <b>aparte</b> de la base del registro, idealmente en un USB cifrado que solo tienen los data managers. Nunca se exporta."}</p></div>
+      ${d.local ? `<div style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="llGuardar" style="background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.25)">${icono("exportar")} Guardar copia</button>
+        <label class="btn" style="background:rgba(255,255,255,.12);color:#fff;border-color:rgba(255,255,255,.25)">${icono("importar")} Cargar copia<input type="file" id="llCargar" accept=".xlsx" hidden></label></div>` : ""}</div>`;
     if (!d.disponible) {
       cont.innerHTML = `${cab}<div class="tarjeta pad"><h3>${icono("aviso")} Libro llave no disponible</h3>
         <p class="sub">No se encuentra la carpeta <code class="codigo">${esc(d.ruta)}</code>. Conecte el USB o arranque el servidor indicando la ruta:</p>
@@ -904,6 +937,10 @@ async function pLlave() {
             <label>Notas (opcional)<input class="inp" name="notas" autocomplete="off"></label><div class="error" id="errL"></div>
             <button class="btn primario grande">${icono("llave")} Asignar número de caso</button></form>`}
         </div></div>`;
+    $("#llGuardar")?.addEventListener("click", () => L.exportarLlave());
+    $("#llCargar")?.addEventListener("change", async (ev) => {
+      try { const n = await L.importarLlave(ev.target.files[0]); toast(`${n} pacientes añadidos al libro llave`); pintar(); } catch (e) { toast(e.message, "mal"); }
+    });
     const ql = $("#ql");
     ql.onkeydown = (e) => { if (e.key === "Enter") { q = ql.value.trim(); pintar(); } };
     $$("[data-ver]", cont).forEach((b) => (b.onclick = () => { const n = +b.dataset.ver; ver.has(n) ? ver.delete(n) : ver.add(n); pintar(asignado); }));
@@ -932,14 +969,17 @@ async function pExportar() {
     <div class="grid g2">
       <div class="tarjeta pad"><h3>Descargar</h3><div class="sub" style="margin-bottom:16px">Una fila por paciente; columnas con los nombres del registro (en inglés). Sí = 1, No = 0, vacío = no consta.</div>
         <label style="display:flex;gap:8px;align-items:center;margin-bottom:18px"><input type="checkbox" id="soloVal"> Solo casos validados</label>
-        <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn primario grande" id="dX" href="/api/exportar/xlsx">${icono("exportar")} Excel (.xlsx)</a>
-        <a class="btn grande" id="dC" href="/api/exportar/csv">${icono("exportar")} CSV</a></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn primario grande" id="dX" href="api/exportar/xlsx">${icono("exportar")} Excel (.xlsx)</a>
+        <a class="btn grande" id="dC" href="api/exportar/csv">${icono("exportar")} CSV</a></div>
         <div class="aviso-local" style="margin-top:18px">${icono("info")}<div>El Excel incluye una segunda hoja <b>Solo_local_NO_ENVIAR</b> con las variables propias que no pide el registro (si las hay). Bórrela antes de enviar.</div></div>
       </div>
       <div class="tarjeta pad"><h3>Columnas</h3><div class="sub" style="margin-bottom:12px">${cols.registro.length} del registro${cols.local.length ? ` · <span style="color:var(--warn)">${cols.local.length} solo locales</span>` : ""}</div>
         <div class="cols-prev">${cols.registro.map((c) => `<span>${esc(c)}</span>`).join("")}${cols.local.map((c) => `<span class="local">${esc(c)}</span>`).join("")}</div></div>
     </div>`;
-  $("#soloVal").onchange = (e) => { const s = e.target.checked ? "?validados=1" : ""; $("#dX").href = "/api/exportar/xlsx" + s; $("#dC").href = "/api/exportar/csv" + s; };
+  $("#soloVal").onchange = (e) => { const s = e.target.checked ? "?validados=1" : ""; $("#dX").href = "api/exportar/xlsx" + s; $("#dC").href = "api/exportar/csv" + s; };
+  if (navegador()) {
+    for (const [id, f] of [["#dX", "xlsx"], ["#dC", "csv"]]) $(id).onclick = (ev) => { ev.preventDefault(); L.exportarRegistro($("#soloVal").checked, f); };
+  }
 }
 
 // ===========================================================================
@@ -1000,6 +1040,135 @@ async function pDiccionario() {
     $$("[data-gg]", cont).forEach((x) => (x.onclick = () => { g = x.dataset.gg; pintar(); }));
   };
   pintar();
+}
+
+// ===========================================================================
+//  MODO NAVEGADOR: perfil, carpeta compartida y unión de casos
+// ===========================================================================
+function pintarPerfil() {
+  window.onhashchange = null;
+  let rol = "intro";
+  $("#raiz").innerHTML = `<div class="login">${heroe()}
+    <div class="lado"><form class="caja form" id="fPerfil" autocomplete="off">
+      <div><h2>¿Quién va a trabajar en este ordenador?</h2>
+        <div class="sub">Sus casos se guardan en este navegador y en la carpeta compartida del SMS. No hay contraseña: el acceso lo protege su sesión de Windows.</div></div>
+      <div class="roles">
+        <button type="button" class="rol on" data-rol="intro">${icono("editar")}<b>Introducción de datos</b><span>Rellena sus casos</span></button>
+        <button type="button" class="rol" data-rol="dm">${icono("escudo")}<b>Data manager</b><span>Libro llave, unir y exportar</span></button>
+      </div>
+      <label>Nombre y apellidos<input class="inp" name="nombre" required></label>
+      <label>Nombre corto (para el archivo)<input class="inp" name="usuario" required placeholder="p. ej. carmen.ruiz"></label>
+      <div class="error" id="errP"></div>
+      <button class="btn primario grande" style="justify-content:center">Empezar ${icono("flechaD")}</button>
+      <button type="button" class="btn fantasma" id="bDemo" style="justify-content:center">${icono("ojo")} Solo quiero probarla con pacientes inventados</button>
+    </form></div></div>`;
+  const f = $("#fPerfil");
+  $$(".rol", f).forEach((b) => (b.onclick = () => { rol = b.dataset.rol; $$(".rol", f).forEach((x) => x.classList.toggle("on", x === b)); }));
+  f.nombre.oninput = () => {
+    if (f.usuario.dataset.tocado) return;
+    f.usuario.value = f.nombre.value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim().split(/\s+/).slice(0, 2).join(".").replace(/[^a-z0-9._-]/g, "");
+  };
+  f.usuario.oninput = () => (f.usuario.dataset.tocado = 1);
+  f.onsubmit = async (ev) => {
+    ev.preventDefault();
+    try {
+      await api("POST", "configurar", { nombre: f.nombre.value, usuario: f.usuario.value, rol });
+      S.info = await api("GET", "estado"); S.yo = S.info.usuario;
+      location.hash = (await L.infoCarpeta()).nombre ? "#/panel" : "#/carpeta";
+      await entrar();
+    } catch (e) { $("#errP").textContent = e.message; }
+  };
+  $("#bDemo").onclick = async () => {
+    try {
+      await api("POST", "configurar", { nombre: "Data manager (demo)", usuario: "admin", rol: "dm" });
+      if ((await api("GET", "casos")).length === 0) await L.cargarDemo();
+      S.info = await api("GET", "estado"); S.yo = S.info.usuario;
+      location.hash = "#/panel"; await entrar();
+    } catch (e) { $("#errP").textContent = e.message; }
+  };
+}
+
+async function pintarEstadoCarpeta() {
+  const b = $("#estCarpeta");
+  if (!b) return;
+  const i = await L.infoCarpeta();
+  let cls = "mal", ic = "aviso", t1 = "Sin carpeta compartida", t2 = "Pulse para vincularla";
+  if (i.nombre && i.permiso !== "granted") { cls = "aviso"; ic = "nube"; t1 = "Carpeta desconectada"; t2 = "Pulse para reconectar"; }
+  else if (i.nombre && i.error) { cls = "mal"; ic = "aviso"; t1 = "No se pudo guardar"; t2 = "Pulse para ver el problema"; }
+  else if (i.nombre) { cls = "ok"; ic = i.guardando || i.pendiente ? "historial" : "nube"; t1 = i.guardando || i.pendiente ? "Guardando…" : "Guardado en la carpeta"; t2 = `${i.nombre} · ${i.ultimo ? relativo(i.ultimo) : "—"}`; }
+  b.className = "estado-carpeta " + cls;
+  b.innerHTML = `${icono(ic)}<span><b>${t1}</b><small>${esc(t2)}</small></span>`;
+  b.onclick = async () => {
+    if (i.nombre && i.permiso !== "granted") { if (await L.reconectarCarpeta()) toast("Carpeta reconectada"); pintarEstadoCarpeta(); }
+    else location.hash = "#/carpeta";
+  };
+}
+setInterval(() => navegador() && pintarEstadoCarpeta(), 30000);
+
+async function pCarpeta() {
+  barra("Carpeta compartida", "Guardado");
+  const pintar = async () => {
+    const i = await L.infoCarpeta();
+    const pasos = `<ol class="pasos-guia">
+      <li><b>En SharePoint</b> (o Teams) del servicio, cree una carpeta, por ejemplo <code>WILLEM_datos</code>, y compártala con edición solo con el equipo del estudio.</li>
+      <li>Ábrala en el navegador y pulse <b>Sincronizar</b> (o <b>Agregar acceso directo a Mis archivos</b>). Aparecerá en el Explorador de Windows, bajo <i>Servicio Murciano de Salud</i>.</li>
+      <li>Pulse aquí <b>Vincular carpeta</b> y elija esa carpeta. A partir de entonces la aplicación guarda sola su Excel <code>${esc(i.archivo || "")}</code> y OneDrive lo sube con su cuenta del SMS.</li>
+      <li>El libro llave <b>nunca</b> va en esta carpeta.</li></ol>`;
+    let estado;
+    if (!i.soportada) {
+      estado = `<div class="tarjeta pad"><h3>${icono("aviso")} Este navegador no puede guardar en carpetas</h3>
+        <p class="sub">Use <b>Microsoft Edge</b> o <b>Google Chrome</b>. Mientras tanto, sus casos están en este navegador: descargue una copia y guárdela usted en la carpeta compartida.</p>
+        <button class="btn primario" id="cDesc">${icono("exportar")} Descargar mi archivo</button></div>`;
+    } else if (!i.nombre) {
+      estado = `<div class="tarjeta pad carpeta-cta"><div class="ic-gr">${icono("nube")}</div><div><h3>Vincule la carpeta compartida</h3>
+        <p class="sub">Hasta que lo haga, sus casos solo están en este navegador y se perderían si se borra el historial.</p>
+        <button class="btn primario grande" id="cElegir">${icono("nube")} Vincular carpeta</button></div></div>`;
+    } else {
+      const ok = i.permiso === "granted" && !i.error;
+      estado = `<div class="tarjeta pad carpeta-cta ${ok ? "ok" : ""}"><div class="ic-gr">${icono(ok ? "check" : "aviso")}</div><div>
+        <h3>${ok ? "Guardando automáticamente" : i.permiso !== "granted" ? "Hay que volver a dar permiso" : "Último guardado con error"}</h3>
+        <p class="sub">Carpeta: <b>${esc(i.nombre)}</b> · Archivo: <code>${esc(i.archivo)}</code><br>Último guardado: <b>${i.ultimo ? esc(relativo(i.ultimo)) + " (" + esc(i.ultimo.replace("T", " ")) + ")" : "nunca"}</b>
+        ${i.error && i.error !== "permiso" ? `<br><span style="color:var(--bad)">${esc(i.error)}</span>` : ""}</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${i.permiso !== "granted" ? `<button class="btn primario" id="cRecon">${icono("nube")} Reconectar</button>` : `<button class="btn primario" id="cAhora">${icono("check")} Guardar ahora</button>`}
+          <button class="btn" id="cElegir">Cambiar de carpeta</button><button class="btn" id="cDesc">${icono("exportar")} Descargar copia</button>
+          <button class="btn fantasma peligro" id="cOlvidar">Desvincular</button></div></div></div>`;
+    }
+    $("#contenido").innerHTML = `<div class="aviso-local">${icono("candado")}<div><b>Cómo se guardan los datos.</b> La aplicación no envía nada a internet. Escribe un Excel con <b>solo números de caso</b> en una carpeta de su ordenador; si esa carpeta está sincronizada con el OneDrive/SharePoint del SMS, OneDrive lo sube con su cuenta corporativa.</div></div>
+      <div class="grid g2" style="grid-template-columns:1.1fr 1fr;align-items:start">${estado}<div class="tarjeta pad"><h3>Cómo prepararla (una sola vez)</h3>${pasos}</div></div>`;
+    $("#cElegir")?.addEventListener("click", async () => {
+      try { const r = await L.elegirCarpeta(); toast(r && (r.nuevos || r.actualizados) ? `Carpeta vinculada · recuperados ${r.nuevos + r.actualizados} casos de su archivo` : "Carpeta vinculada"); await cargarCasos(); pintar(); pintarEstadoCarpeta(); }
+      catch (e) { if (e.name !== "AbortError") toast(e.message, "mal"); }
+    });
+    $("#cRecon")?.addEventListener("click", async () => { if (await L.reconectarCarpeta()) toast("Carpeta reconectada"); pintar(); pintarEstadoCarpeta(); });
+    $("#cAhora")?.addEventListener("click", async () => { if (await L.guardarAhora()) toast("Guardado"); pintar(); });
+    $("#cDesc")?.addEventListener("click", () => L.descargarCopia());
+    $("#cOlvidar")?.addEventListener("click", async () => { if (await modal({ titulo: "Desvincular carpeta", aceptar: "Desvincular", peligro: true, html: "<p>Se dejará de guardar en la carpeta. Los casos siguen en este navegador y el archivo de la carpeta no se borra.</p>" })) { await L.olvidarCarpeta(); pintar(); pintarEstadoCarpeta(); } });
+  };
+  await pintar();
+}
+
+async function pUnir() {
+  barra("Unir casos", "Data manager");
+  const info = await L.infoCarpeta();
+  const cont = $("#contenido");
+  const tabla = (inf) => `<div class="tarjeta" style="margin-top:18px"><table class="tabla compacta"><thead><tr><th>Archivo</th><th>Nuevos</th><th>Actualizados</th><th>Sin cambios</th><th>Más reciente aquí</th><th>Avisos</th></tr></thead><tbody>
+    ${inf.map((r) => `<tr style="cursor:default"><td class="codigo">${esc(r.archivo)}</td>${r.error ? `<td colspan="5" style="color:var(--bad)">${esc(r.error)}</td>` : `
+      <td><b>${r.nuevos}</b></td><td><b>${r.actualizados}</b></td><td>${r.iguales}</td><td>${r.conservados}</td>
+      <td>${r.conflictos.length ? `<span style="color:var(--warn)">${r.conflictos.map(esc).join("<br>")}</span>` : `<span class="sub">—</span>`}</td>`}</tr>`).join("") || `<tr><td colspan="6" class="vacio">No hay archivos de otras personas en la carpeta.</td></tr>`}</tbody></table></div>`;
+  cont.innerHTML = `<div class="aviso-local">${icono("info")}<div>Lee los Excel <code>WILLEM_*.xlsx</code> de la carpeta compartida y los junta con sus casos. Si un caso está en varios sitios, <b>gana la versión modificada más recientemente</b>. Si dos personas usaron el mismo número para pacientes distintos, se avisa y no se mezcla.</div></div>
+    <div class="tarjeta pad carpeta-cta"><div class="ic-gr">${icono("unir")}</div><div><h3>${info.nombre ? `Carpeta: ${esc(info.nombre)}` : "No hay carpeta vinculada"}</h3>
+      <p class="sub">${info.nombre ? "Pulse para traer los casos de todo el equipo." : "Vincule la carpeta compartida o elija los archivos a mano."}</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${info.nombre && info.soportada ? `<button class="btn primario grande" id="uAhora">${icono("unir")} Unir casos de la carpeta</button>` : `<a class="btn primario" href="#/carpeta">${icono("nube")} Vincular carpeta</a>`}
+      <label class="btn">${icono("importar")} Elegir archivos a mano<input type="file" id="uArch" accept=".xlsx" multiple hidden></label></div></div></div><div id="uRes"></div>`;
+  const mostrar = async (inf) => {
+    $("#uRes").innerHTML = tabla(inf);
+    const n = inf.reduce((a, r) => a + (r.nuevos || 0) + (r.actualizados || 0), 0);
+    toast(n ? (n === 1 ? "1 caso incorporado o actualizado" : `${n} casos incorporados o actualizados`) : "No había cambios nuevos", n ? "ok" : "info");
+    await cargarCasos();
+  };
+  $("#uAhora")?.addEventListener("click", async (ev) => { ev.target.disabled = true; try { await mostrar(await L.unirCarpeta()); } catch (e) { toast(e.message, "mal"); } ev.target.disabled = false; });
+  $("#uArch").onchange = async (ev) => { try { await mostrar(await L.unirArchivos([...ev.target.files])); } catch (e) { toast(e.message, "mal"); } };
 }
 
 arrancar();

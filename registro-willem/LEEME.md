@@ -3,7 +3,25 @@
 Aplicación web **100 % local** para introducir los casos del registro WILLEM.
 No usa internet ni servicios externos: los datos se quedan en el ordenador.
 
-## Arrancar (Windows)
+## Opción recomendada: SIN instalar nada (modo navegador)
+
+Abra **** con doble clic en **Microsoft Edge o Google Chrome**. Nada más.
+
+- Cada persona elige su perfil (introducción de datos o data manager).
+- Sus casos se guardan en el navegador **y** en un Excel propio () dentro de la
+  **carpeta compartida de SharePoint/OneDrive del SMS** que vincule (menú *Carpeta compartida*).
+  OneDrive lo sube con la cuenta corporativa de cada persona; la aplicación no se conecta a internet.
+- El data manager pulsa **Unir casos** para juntar los Excel de todo el equipo y luego **Exportar**.
+- El libro llave se queda en el navegador del data manager (con copia en un sitio privado), nunca en la carpeta compartida.
+- Para probar: botón *Solo quiero probarla con pacientes inventados*.
+
+Si cambia el diccionario o el código, regenere el archivo con OK  diccionario: 224 campos · demo: 27 casos
+OK  dist/WILLEM.html  (389 KB).
+La carpeta  también puede publicarse tal cual en GitHub Pages (funciona en modo navegador).
+
+## Opción con servidor (base de datos común en un PC)
+
+### Arrancar (Windows)
 
 | Archivo | Para qué |
 |---|---|
