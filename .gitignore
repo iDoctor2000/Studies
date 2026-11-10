@@ -4,6 +4,6 @@
 llave*
 datos_reales/
 __pycache__/
-datos/
-llave/
-python/
+registro-willem/datos/
+registro-willem/llave/
+registro-willem/python/
