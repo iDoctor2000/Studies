@@ -50,3 +50,13 @@ diccionario/       diccionario maestro (Excel)
 herramientas/      generador del diccionario a partir del CRF original
 docs/              arquitectura
 ```
+
+## Base de datos en una carpeta compartida (NAS)
+
+```
+iniciar.bat --datos \\NAS\willem\datos
+```
+
+El programa detecta que es una carpeta de red y usa un modo de SQLite seguro para ella.
+**Importante:** el servidor debe estar abierto en **un solo ordenador a la vez**; los demás
+entran con el navegador (`iniciar_red.bat`). El libro llave NO debe ir en la misma carpeta.

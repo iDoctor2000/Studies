@@ -170,11 +170,28 @@ def db():
         con.close()
 
 
+def es_ruta_de_red(ruta):
+    """True si la ruta está en una carpeta compartida (NAS, unidad de red)."""
+    ruta = os.path.abspath(ruta)
+    if ruta.startswith("\\\\") or ruta.startswith("//"):
+        return True
+    if os.name == "nt":
+        try:
+            import ctypes
+            unidad = os.path.splitdrive(ruta)[0] + "\\"
+            return ctypes.windll.kernel32.GetDriveTypeW(unidad) == 4  # DRIVE_REMOTE
+        except Exception:
+            return False
+    return False
+
+
 def iniciar_db():
     os.makedirs(os.path.dirname(CFG["db"]), exist_ok=True)
+    # El modo WAL de SQLite no es seguro en carpetas de red: allí se usa el modo clásico.
+    modo = "DELETE" if CFG.get("red_fs") else "WAL"
     with db() as con:
+        con.execute(f"PRAGMA journal_mode={modo}")
         con.executescript("""
-        PRAGMA journal_mode=WAL;
         CREATE TABLE IF NOT EXISTS usuarios(
             id INTEGER PRIMARY KEY, usuario TEXT UNIQUE NOT NULL, nombre TEXT NOT NULL,
             rol TEXT NOT NULL CHECK(rol IN ('dm','intro')), hash TEXT NOT NULL,
@@ -759,6 +776,7 @@ def main():
     CFG["demo"] = a.demo
     CFG["db"] = os.path.join(a.datos, "demo.sqlite" if a.demo else "registro.sqlite")
     CFG["llave"] = os.path.join(a.datos, "llave_demo", "llave.sqlite") if a.demo else os.path.abspath(a.llave)
+    CFG["red_fs"] = es_ruta_de_red(a.datos)
     iniciar_db()
     if a.demo:
         os.makedirs(os.path.dirname(CFG["llave"]), exist_ok=True)
@@ -780,7 +798,9 @@ def main():
             print(f"  Desde otros PCs de la red: http://{ip}:{a.puerto}")
         except OSError:
             pass
-    print(f"  Base de datos: {CFG['db']}")
+    print(f"  Base de datos: {CFG['db']}" + ("   (carpeta de red)" if CFG["red_fs"] else ""))
+    if CFG["red_fs"]:
+        print("  AVISO: con la base en una carpeta de red, abra el servidor en UN SOLO ordenador a la vez.")
     print(f"  Libro llave:   {CFG['llave']}")
     print("  Para cerrar: Ctrl+C o cierre esta ventana.\n")
     if not a.no_navegador:
