@@ -1,0 +1,6 @@
+# Nunca subir datos reales
+*.db
+*.sqlite
+llave*
+datos_reales/
+__pycache__/
