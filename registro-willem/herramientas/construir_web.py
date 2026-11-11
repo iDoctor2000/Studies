@@ -61,7 +61,7 @@ def modulo_como_iife(nombre, codigo):
     imports = []
 
     def imp(m):
-        cosas, origen = m.group(1).strip(), m.group(2)
+        cosas, origen = " ".join(m.group(1).split()), m.group(2)
         mod = "__m_" + os.path.splitext(os.path.basename(origen))[0]
         if cosas.startswith("* as "):
             imports.append(f"const {cosas[5:].strip()} = {mod};")
@@ -69,7 +69,9 @@ def modulo_como_iife(nombre, codigo):
             imports.append(f"const {cosas} = {mod};")
         return ""
 
-    codigo = re.sub(r'^import\s+(.+?)\s+from\s+"(.+?)";\s*$', imp, codigo, flags=re.M)
+    codigo = re.sub(r'^import\s+([^;]+?)\s+from\s+"(.+?)";[ \t]*$', imp, codigo, flags=re.M)  # admite varias líneas
+    if re.search(r"^import\s", codigo, flags=re.M):
+        raise SystemExit(f"{nombre}.js: hay un import que no se ha podido convertir")
     exportados = re.findall(r"^export\s+(?:async\s+)?(?:function\*?|const|let|class)\s+([A-Za-z_$][\w$]*)", codigo, flags=re.M)
     for grupo in re.findall(r"^export\s*\{([^}]*)\};?\s*$", codigo, flags=re.M):
         exportados += [x.strip() for x in grupo.split(",") if x.strip()]

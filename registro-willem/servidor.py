@@ -36,7 +36,8 @@ from urllib.parse import parse_qs, urlparse
 BASE = os.path.dirname(os.path.abspath(__file__))
 WEB = os.path.join(BASE, "web")
 DICCIONARIO = os.path.join(BASE, "diccionario", "diccionario_maestro.xlsx")
-SITE_ID = "ARRIXACA"
+SITE_ID = "HCUVA"
+MARCAS = ("NC", "DUDA")  # Desconocido / Duda: en el Excel final van vacíos
 SESION_HORAS = 12
 
 # Windows a veces asigna tipos MIME erróneos a .js/.css (los módulos no cargarían)
@@ -342,6 +343,7 @@ def filas_exportacion(solo_local=False, solo_validados=False):
     else:
         cab = ["patient_id"] + cols
     filas = [cab]
+    copias = copias_calculadas()
     with db() as con:
         q = "SELECT * FROM casos" + (" WHERE estado='validado'" if solo_validados else "") + " ORDER BY numero"
         for r in con.execute(q):
@@ -351,9 +353,27 @@ def filas_exportacion(solo_local=False, solo_validados=False):
             else:
                 fila = [SITE_ID, r["numero"], r["creado"]]
             for c in cols:
-                x = v.get(c)
-                fila.append("" if x is None else x)
+                x = v.get(copias.get(c, c))
+                fila.append("" if x is None or x in MARCAS else x)
             filas.append(fila)
+    return filas
+
+
+def copias_calculadas():
+    """Campos cuyo valor se copia de otro (columna copiar_de del diccionario)."""
+    return {str(d["codigo_variable"]): str(d["copiar_de"]).strip() for d in diccionario()["campos"] if str(d.get("copiar_de") or "").strip()}
+
+
+def filas_marcas(solo_validados=False):
+    """Hoja interna: qué campos quedaron como Desconocido o Duda (no se envía)."""
+    filas = [["patient_id", "variable", "estado", "nota_duda"]]
+    with db() as con:
+        q = "SELECT * FROM casos" + (" WHERE estado='validado'" if solo_validados else "") + " ORDER BY numero"
+        for r in con.execute(q):
+            v = json.loads(r["valores"])
+            for k, x in sorted(v.items()):
+                if x in MARCAS:
+                    filas.append([r["numero"], k, "Desconocido" if x == "NC" else "Duda", v.get(k + "_duda_nota", "")])
     return filas
 
 
@@ -643,6 +663,8 @@ class Manejador(BaseHTTPRequestHandler):
             if b.get("estado") in ("borrador", "completo", "validado") and b["estado"] != estado:
                 if (b["estado"] == "validado" or estado == "validado") and u["rol"] != "dm":
                     raise Error(403, "Solo un data manager puede validar")
+                if b["estado"] == "validado" and "DUDA" in valores.values():
+                    raise Error(409, "No se puede validar: el caso tiene dudas sin resolver")
                 cambios.append(("(estado)", estado, b["estado"]))
                 estado = b["estado"]
             if cambios:
@@ -691,6 +713,9 @@ class Manejador(BaseHTTPRequestHandler):
         hojas = [("WILLEM_registro", reg)]
         if len(loc[0]) > 1:
             hojas.append(("Solo_local_NO_ENVIAR", loc))
+        marcas = filas_marcas(solo_val)
+        if len(marcas) > 1:
+            hojas.append(("Desconocido_Duda_NO_ENVIAR", marcas))
         data = crear_xlsx(hojas)
         self._descarga(data, f"WILLEM_{SITE_ID}_{sello}.xlsx",
                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -739,8 +764,8 @@ class Manejador(BaseHTTPRequestHandler):
 
 
 # ---------------------------------------------------------------------------
-GRUPOS_PRINCIPALES = ["IC", "ISQ", "EAO", "MCH", "ATTR"]
-GRUPOS_TODOS = GRUPOS_PRINCIPALES + ["QTL"]
+GRUPOS_PRINCIPALES = ["IC", "ISQ", "EAO", "MCH", "ATTR", "QTL"]
+GRUPOS_TODOS = GRUPOS_PRINCIPALES
 DIAG = {"IC": "heart_failure", "ISQ": "ischemic_cardiomyopathy", "EAO": "aortic_stenosis",
         "MCH": "hypertrophic_cardiomyopathy", "ATTR": "amyloidosis_attr", "QTL": "long_qt_syndrome"}
 

@@ -1,6 +1,7 @@
 // Registro WILLEM · aplicación web local
 import { icono, ENFERMEDADES, PRINCIPALES } from "./iconos.js";
-import { construirModelo, pestanasDelCaso, progresoPestana, progresoCaso, progresoItems, rellenarNo, visible } from "./modelo.js";
+import { construirModelo, pestanasDelCaso, progresoPestana, progresoCaso, progresoItems, rellenarNo, visible,
+  NC, DUDA, esMarca, marcaDe, admiteMarcas, dudasDelCaso, valoresPorDefecto } from "./modelo.js";
 import { anonimizar, extraer, EJEMPLO } from "./importador.js";
 import * as L from "./local.js";
 
@@ -145,6 +146,7 @@ async function enrutar() {
     else if (pag === "exportar" && esDM()) await pExportar();
     else if (pag === "usuarios" && esDM()) await pUsuarios();
     else if (pag === "diccionario") await pDiccionario();
+    else if (pag === "dudas") await pDudas();
     else if (pag === "carpeta" && navegador()) await pCarpeta();
     else if (pag === "unir" && navegador() && esDM()) await pUnir();
     else location.hash = "#/panel";
@@ -260,6 +262,7 @@ function pintarEstructura() {
         <div class="titulo">Trabajo</div>
         <a href="#/panel" data-pag="panel">${icono("panel")} Panel</a>
         <a href="#/casos" data-pag="casos">${icono("casos")} Casos <span class="contador" id="nCasos"></span></a>
+        <a href="#/dudas" data-pag="dudas">${icono("bandera")} Dudas <span class="contador aviso oculto" id="nDudas"></span></a>
         <a href="#/diccionario" data-pag="diccionario">${icono("libro")} Diccionario</a>
         ${dm ? `<div class="titulo">Data manager</div>
         <a href="#/llave" data-pag="llave">${icono("llave")} Libro llave</a>
@@ -295,7 +298,9 @@ function pintarEstructura() {
 
 async function cargarCasos() {
   S.casos = await api("GET", "casos");
-  S.casos.forEach((c) => (c.progreso = progresoCaso(S.modelo, c)));
+  S.casos.forEach((c) => { c.progreso = progresoCaso(S.modelo, c); c.dudas = dudasDelCaso(S.modelo, c); });
+  const nd = S.casos.reduce((a, c) => a + c.dudas.length, 0);
+  const elD = $("#nDudas"); if (elD) { elD.textContent = nd || ""; elD.classList.toggle("oculto", !nd); }
   const n = $("#nCasos"); if (n) n.textContent = S.casos.length;
   return S.casos;
 }
@@ -367,7 +372,7 @@ async function pPanel() {
         .map(([i, v, e]) => `<div class="tarjeta kpi"><div class="ic">${icono(i)}</div><div><div class="v">${v}</div><div class="e">${e}</div></div></div>`).join("")}
     </div>
     <div class="bloque-tit" style="margin-top:6px">Por enfermedad principal</div>
-    <div class="grid g5" style="margin-bottom:18px">
+    <div class="grid g-enf" style="margin-bottom:18px">
       ${porEnf.map(({ g, n, pct }) => `<a class="enf-card" style="--c:${ENFERMEDADES[g].color}" href="#/casos?enf=${g}">
         <div class="ic">${icono(g)}</div><div class="num">${n}</div><div class="nom">${esc(ENFERMEDADES[g].nombre)}</div>
         <div class="barra-p"><i style="width:${pct}%"></i></div><div class="mini"><span>Completitud</span><b>${pct}%</b></div></a>`).join("")}
@@ -414,7 +419,7 @@ async function pCasos(qs) {
           <td>${pillEnf(c.principal)}</td>
           <td>${c.secundarias.map((s) => pillEnf(s, true)).join(" ") || `<span class="sub">—</span>`}</td>
           <td><div style="display:flex;align-items:center;gap:10px">${anillo(c.progreso.pct, 40, 4.5)}<span class="sub">${c.progreso.ok}/${c.progreso.tot}</span></div></td>
-          <td>${estadoPill(c.estado)}</td>
+          <td>${estadoPill(c.estado)} ${c.dudas.length ? `<span class="pill sec" style="--c:#d97706" title="Dudas sin resolver">${icono("bandera")} ${c.dudas.length}</span>` : ""}</td>
           <td class="quien">${relativo(c.modificado)}<small>por ${esc(c.modificado_por)}</small></td></tr>`).join("")}
         </tbody></table>` : `<div class="vacio">${icono("casos")}<p>No hay casos con estos filtros.</p><a class="btn primario" href="#/nuevo">${icono("mas")} Crear un caso</a></div>`}
       </div>`;
@@ -476,7 +481,12 @@ async function pNuevo(qs) {
     if (W.paso === 3) {
       $$("[data-s]", cont).forEach((x) => (x.onclick = () => { const g = x.dataset.s; W.sec = W.sec.includes(g) ? W.sec.filter((s) => s !== g) : [...W.sec, g]; pintar(); }));
       $("#crear").onclick = async () => {
-        try { await api("POST", "casos", { numero: W.numero, principal: W.principal, secundarias: W.sec }); toast(`Caso #${pad(W.numero)} creado`); location.hash = `#/caso/${W.numero}`; }
+        try {
+          await api("POST", "casos", { numero: W.numero, principal: W.principal, secundarias: W.sec });
+          const def = valoresPorDefecto(S.modelo, {});
+          if (Object.keys(def).length) await api("PUT", "casos/" + W.numero, { valores: def });
+          toast(`Caso #${pad(W.numero)} creado`); location.hash = `#/caso/${W.numero}`;
+        }
         catch (e) { toast(e.message, "mal"); }
       };
     }
@@ -525,6 +535,7 @@ function pintarCaso(animar = false) {
       <div><div class="t1">Enfermedad principal</div>
         <div class="t2">${esc(e.nombre)} <span class="num-caso">#${pad(c.numero)}</span></div>
         <div class="secs">${c.secundarias.map((s) => `<span class="pill sec">${icono(s)} ${esc(ENFERMEDADES[s].nombre)}</span>`).join("")}
+          ${(() => { const d = dudasDelCaso(S.modelo, c); return d.length ? `<a class="pill sec duda-pill" href="#/caso/${c.numero}/${encodeURIComponent(d[0].pestana)}" title="Ir a la primera duda">${icono("bandera")} ${d.length} duda${d.length > 1 ? "s" : ""}</a>` : ""; })()}
           ${soloLectura() ? "" : `<button class="btn pequeno" id="bDiag">${icono("editar")} Diagnósticos</button>`}</div></div>
       <div class="der">
         <span class="guardado" id="guardado">${icono("check")} Guardado</span>
@@ -554,7 +565,8 @@ function pintarCaso(animar = false) {
         <div class="seccion-cab">
           <div>${tab.grupo ? pillEnf(tab.grupo) : ""}<h2 style="margin-top:${tab.grupo ? 8 : 0}px">${esc(tab.titulo)}</h2>
             <div class="sub">${pt.ok} de ${pt.tot} respondidos${tab.grupo ? " · campos específicos de esta enfermedad" : ""}</div></div>
-          <div class="der">${soloLectura() ? "" : `<button class="btn" id="bRellenar" title="Pone No (0) en todos los Sí/No que estén sin contestar en esta pestaña">${icono("varita")} Marcar el resto como No</button>`}</div>
+          <div class="der">${soloLectura() ? "" : `<button class="btn fantasma" id="bRellenarNC" title="Pone Desconocido en todas las preguntas Sí/No y listas sin contestar de esta pestaña">${icono("interrogacion")} Resto: Desconocido</button>
+            <button class="btn" id="bRellenar" title="Pone No (0) en todos los Sí/No que estén sin contestar en esta pestaña">${icono("varita")} Marcar el resto como No</button>`}</div>
         </div>
         <div id="seccion">${tab.bloques.map((b) => `${b.subtitulo ? `<div class="bloque-tit">${esc(b.subtitulo)}</div>` : ""}
           <div class="campos">${b.items.filter((it) => visible(it, c.valores)).map((it) => campoHTML(it, c.valores, animar)).join("")}</div>`).join("")}</div>
@@ -581,6 +593,9 @@ function pintarCaso(animar = false) {
   $("#bDiag")?.addEventListener("click", editarDiagnosticos);
   $("#selEstado").onchange = async (ev) => {
     await vaciarPendientes();
+    if (ev.target.value === "validado" && dudasDelCaso(S.modelo, c).length) {
+      toast("No se puede validar: hay dudas sin resolver en este caso", "mal"); return pintarCaso();
+    }
     try { E.caso = await api("PUT", "casos/" + c.numero, { estado: ev.target.value }); toast("Estado: " + ev.target.selectedOptions[0].text); pintarCaso(); }
     catch (er) { toast(er.message, "mal"); pintarCaso(); }
   };
@@ -589,6 +604,17 @@ function pintarCaso(animar = false) {
     if (prog.pct < 100) toast(`Faltan ${prog.tot - prog.ok} campos por responder`, "info");
     else if (c.estado === "borrador") { E.caso = await api("PUT", "casos/" + c.numero, { estado: "completo" }); toast("Caso marcado como completo"); }
     location.hash = "#/casos";
+  });
+  $("#bRellenarNC")?.addEventListener("click", async () => {
+    const vv = c.valores, cambios = {};
+    for (const it of tab.bloques.flatMap((b) => b.items)) {
+      if (!admiteMarcas(it) || !visible(it, vv) || marcaDe(it, vv)) continue;
+      if (it.opciones ? it.opciones.every((o) => vv[o.codigo] == null) : vv[it.codigo] == null) cambios[it.codigo] = NC;
+    }
+    const n = Object.keys(cambios).length;
+    if (!n) return toast("No hay preguntas sin contestar en esta pestaña", "info");
+    const ok = await modal({ titulo: "Marcar el resto como Desconocido", aceptar: `Poner Desconocido en ${n}`, html: `<p>Se marcarán como <b>Desconocido</b> (lo he buscado y no consta) las preguntas sin contestar de <b>${esc(tab.titulo)}</b>.</p><p class="sub">En el Excel final irán vacías. Quedará anotado en el historial.</p>` });
+    if (ok) { aplicar(cambios, "relleno_no"); toast(`${n} respuestas marcadas como Desconocido`); }
   });
   $("#bRellenar")?.addEventListener("click", async () => {
     const items = tab.bloques.flatMap((b) => b.items);
@@ -609,7 +635,9 @@ function campoHTML(it, v, animar) {
   const prov = it.provisional ? ` <span class="prov" title="Este código no existe en el CRF oficial">PROVISIONAL</span>` : "";
   const ayuda = it.ayuda && !/^DUPLICADO|Solapa/.test(it.ayuda) ? `<div class="ayuda">${esc(it.ayuda)}</div>` : "";
   const est = animar ? "" : ' style="animation:none"';
+  const mk = admiteMarcas(it) ? marcaDe(it, v) : null;
   const resp = (() => {
+    if (mk) return mk === NC;
     switch (it.tipoCampo) {
       case "single": return it.opciones.some((o) => v[o.codigo] === 1);
       case "multi": return it.opciones.some((o) => v[o.codigo] != null);
@@ -620,6 +648,11 @@ function campoHTML(it, v, animar) {
   const fechaInp = (k, val) => `<input type="date" class="inp" data-in="${esc(k)}" data-t="fecha" data-foco="${esc(k)}" value="${esc(val || "")}" max="${new Date().toISOString().slice(0, 10)}">`;
   const limpiar = (ks) => `<button class="limpiar" data-limpiar="${esc(ks.join(","))}" title="Borrar respuesta">${icono("x")}</button>`;
   let ctrl = "", ancho = false, aviso = "";
+  const botonesMarca = () => `<div class="marcas-bt">
+      <button class="mb ${mk === NC ? "on nc" : ""}" data-marca="${NC}" data-mk="${esc(it.codigo)}" title="Desconocido: lo he buscado y no consta">${icono("interrogacion")}<span>Desconocido</span></button>
+      <button class="mb ${mk === DUDA ? "on duda" : ""}" data-marca="${DUDA}" data-mk="${esc(it.codigo)}" title="Duda: que lo revise un data manager">${icono("bandera")}<span>Duda</span></button></div>`;
+  const notaDuda = () => mk === DUDA ? `<div class="nota-duda">${icono("bandera")}<input class="inp" data-in="${esc(it.codigo)}_duda_nota" data-t="texto" data-foco="${esc(it.codigo)}_duda_nota"
+      placeholder="¿Cuál es la duda? Ej.: «IMC 29,8: ¿cuenta como obesidad?»" value="${esc(v[it.codigo + "_duda_nota"] || "")}"></div>` : "";
 
   switch (it.tipoCampo) {
     case "fijo":
@@ -630,8 +663,9 @@ function campoHTML(it, v, animar) {
     case "sinofecha": {
       const x = v[it.codigo];
       ctrl = `<div class="sino"><button class="si ${x === 1 ? "on" : ""}" data-sino="${esc(it.codigo)}" data-val="1" data-foco="${esc(it.codigo)}:1">Sí</button><button class="no ${x === 0 ? "on" : ""}" data-sino="${esc(it.codigo)}" data-val="0" data-foco="${esc(it.codigo)}:0">No</button></div>
-        ${x != null ? limpiar([it.codigo, it.codigo + "_date"]) : ""}`;
+        ${x != null ? limpiar([it.codigo, it.codigo + "_date", it.codigo + "_duda_nota"]) : ""}${botonesMarca()}`;
       if (it.tipoCampo === "sinofecha" && x === 1) ctrl += `<div class="fecha-op">${icono("historial")} <b>Fecha</b> ${fechaInp(it.codigo + "_date", v[it.codigo + "_date"])}</div>`;
+      ctrl += notaDuda();
       break;
     }
     case "single":
@@ -641,10 +675,11 @@ function campoHTML(it, v, animar) {
       ctrl = `<div class="opciones">${it.opciones.map((o) => {
         const x = v[o.codigo];
         return `<button class="op ${x === 1 ? "on" : ""} ${multi && x === 0 ? "cero" : ""}" data-g="${esc(it.codigo)}" data-o="${esc(o.codigo)}" data-foco="${esc(o.codigo)}" title="${esc(o.codigo)}">${multi && x === 1 ? icono("check") : ""}${esc(o.etiqueta)}</button>`;
-      }).join("")}</div>${it.opciones.some((o) => v[o.codigo] != null) ? limpiar(it.opciones.flatMap((o) => [o.codigo, o.codigo + "_date"])) : ""}`;
-      if (it.conFecha) ctrl += `<div class="fecha-op">${icono("historial")} <b>Fecha</b> ${fechaInp(it.codigo, v[it.codigo])}</div>`;
+      }).join("")}</div>${it.opciones.some((o) => v[o.codigo] != null) || mk ? limpiar([it.codigo, it.codigo + "_duda_nota", ...it.opciones.flatMap((o) => [o.codigo, o.codigo + "_date"])]) : ""}${botonesMarca()}`;
+      if (it.conFecha && !mk) ctrl += `<div class="fecha-op">${icono("historial")} <b>Fecha</b> ${fechaInp(it.codigo, v[it.codigo])}</div>`;
       for (const o of it.opciones) if (o.conFecha && v[o.codigo] === 1) ctrl += `<div class="fecha-op">${icono("historial")} <b>Fecha · ${esc(o.etiqueta)}</b> ${fechaInp(o.codigo + "_date", v[o.codigo + "_date"])}</div>`;
-      if (multi) ctrl += `<div class="ayuda" style="width:100%">Las opciones no marcadas se guardan como No.</div>`;
+      if (multi && !mk) ctrl += `<div class="ayuda" style="width:100%">Las opciones no marcadas se guardan como No.</div>`;
+      ctrl += notaDuda();
       break;
     }
     case "numero":
@@ -662,7 +697,7 @@ function campoHTML(it, v, animar) {
       ancho = true;
       ctrl = `<textarea class="inp" data-in="${esc(it.codigo)}" data-t="texto" data-foco="${esc(it.codigo)}" placeholder="Texto libre…">${esc(v[it.codigo] || "")}</textarea>`;
   }
-  return `<div class="campo ${resp ? "respondido" : ""} ${ancho ? "ancho" : ""}" data-k="${esc(it.codigo)}"${est}>${cab}<div class="ctrl">${ctrl}</div>${aviso}</div>`;
+  return `<div class="campo ${resp ? "respondido" : ""} ${mk === DUDA ? "con-duda" : ""} ${ancho ? "ancho" : ""}" data-k="${esc(it.codigo)}"${est}>${cab}<div class="ctrl">${ctrl}</div>${aviso}</div>`;
 }
 
 function alClicar(ev) {
@@ -670,16 +705,31 @@ function alClicar(ev) {
   const v = E.caso.valores;
   const b = ev.target.closest("button");
   if (!b) return;
-  if (b.dataset.sino) {
+  if (b.dataset.marca) {
+    const k = b.dataset.mk, m = b.dataset.marca, it = S.modelo.porCodigo[k];
+    const cambios = {};
+    if (marcaDe(it, v) === m) { cambios[k] = null; cambios[k + "_duda_nota"] = null; }
+    else {
+      cambios[k] = m;
+      if (m !== DUDA) cambios[k + "_duda_nota"] = null;
+      if (it.opciones) it.opciones.forEach((o) => { cambios[o.codigo] = null; cambios[o.codigo + "_date"] = null; });
+      else cambios[k + "_date"] = null;
+    }
+    for (const x of Object.keys(cambios)) if (cambios[x] === null && v[x] == null) delete cambios[x];
+    aplicar(cambios);
+    if (m === DUDA && cambios[k] === DUDA) setTimeout(() => $(`[data-foco="${CSS.escape(k + "_duda_nota")}"]`)?.focus(), 60);
+  } else if (b.dataset.sino) {
     const k = b.dataset.sino, val = +b.dataset.val;
     const cambios = { [k]: val };
     if (val === 0 && v[k + "_date"]) cambios[k + "_date"] = null;
+    if (v[k + "_duda_nota"]) cambios[k + "_duda_nota"] = null;
     aplicar(cambios);
   } else if (b.dataset.limpiar) {
     aplicar(Object.fromEntries(b.dataset.limpiar.split(",").map((k) => [k, null])));
   } else if (b.dataset.o) {
     const g = S.modelo.porCodigo[b.dataset.g], o = b.dataset.o;
     const cambios = {};
+    if (esMarca(v[g.codigo])) { cambios[g.codigo] = null; cambios[g.codigo + "_duda_nota"] = null; }
     if (g.tipoCampo === "single") {
       if (v[o] === 1) g.opciones.forEach((x) => { cambios[x.codigo] = null; cambios[x.codigo + "_date"] = null; });
       else g.opciones.forEach((x) => { cambios[x.codigo] = x.codigo === o ? 1 : 0; if (x.codigo !== o) cambios[x.codigo + "_date"] = null; });
@@ -712,6 +762,9 @@ function alCambiar(ev) {
 }
 
 function aplicar(cambios, origen = "formulario") {
+  // Reglas por defecto que dependen de lo que acaba de cambiar (p. ej. consentimiento según tipo de reclutamiento)
+  const def = valoresPorDefecto(S.modelo, { ...E.caso.valores, ...cambios }, { soloReglas: true, cambiados: cambios });
+  for (const [k, x] of Object.entries(def)) if (!(k in cambios)) cambios[k] = x;
   if (E.origen && E.origen !== origen) vaciarPendientes();
   E.origen = origen;
   for (const [k, val] of Object.entries(cambios)) {
@@ -812,7 +865,7 @@ async function abrirHistorial() {
     const pre = it.padre ? it.padre.etiqueta + " › " : "";
     return pre + it.etiqueta + (k.endsWith("_date") && !S.modelo.porCodigo[k] ? " (fecha)" : "");
   };
-  const fmt = (x) => x == null ? "∅" : x === "1" ? "Sí" : x === "0" ? "No" : x;
+  const fmt = (x) => x == null ? "∅" : x === "1" ? "Sí" : x === "0" ? "No" : x === NC ? "Desconocido" : x === DUDA ? "Duda" : x;
   cj.cuerpo.innerHTML = aud.length ? `<ul class="historial">${aud.map((a) => `<li><div><div>${esc(fmtFecha(a.fecha))}</div><div class="cuando">${esc(a.fecha.slice(11, 16))} · ${esc(a.usuario)}</div></div>
     <div><div><b>${esc(a.campo.startsWith("(") ? a.campo.slice(1, -1) : etq(a.campo))}</b> ${a.origen !== "formulario" ? `<span class="origen">${a.origen === "importacion" ? "informe" : "relleno No"}</span>` : ""}</div>
     <div class="cambio"><del>${esc(fmt(a.antes))}</del> → <ins>${esc(fmt(a.despues))}</ins></div></div></li>`).join("")}</ul>` : `<div class="vacio">Sin cambios registrados</div>`;
@@ -1040,6 +1093,24 @@ async function pDiccionario() {
     $$("[data-gg]", cont).forEach((x) => (x.onclick = () => { g = x.dataset.gg; pintar(); }));
   };
   pintar();
+}
+
+// ===========================================================================
+//  DUDAS PENDIENTES
+// ===========================================================================
+async function pDudas() {
+  barra("Dudas pendientes", "Revisión");
+  await cargarCasos();
+  const filas = S.casos.flatMap((c) => c.dudas.map((d) => ({ c, d }))).sort((a, b) => a.c.numero - b.c.numero);
+  $("#contenido").innerHTML = `<div class="aviso-local">${icono("bandera")}<div>Preguntas marcadas como <b>Duda</b> por quien introdujo los datos. Un caso con dudas abiertas <b>no se puede validar</b>.
+      Para resolverla, abra el caso y conteste Sí, No o Desconocido.</div></div>
+    <div class="tarjeta">${filas.length ? `<table class="tabla"><thead><tr><th>Caso</th><th>Pregunta</th><th>Pestaña</th><th>Nota de la duda</th><th>Última modificación</th></tr></thead><tbody>
+      ${filas.map(({ c, d }) => `<tr data-ir="#/caso/${c.numero}/${encodeURIComponent(d.pestana)}" style="--c:${ENFERMEDADES[c.principal]?.color}">
+        <td><span class="num-caso"><small>#</small>${pad(c.numero)}</span><div style="margin-top:4px">${pillEnf(c.principal, true)}</div></td>
+        <td><b>${esc(d.etiqueta)}</b><div class="codigo sub">${esc(d.codigo)}</div></td><td class="sub">${esc(d.tituloPestana)}</td>
+        <td>${d.nota ? esc(d.nota) : `<span class="sub">— sin nota —</span>`}</td><td class="quien">${relativo(c.modificado)}<small>por ${esc(c.modificado_por)}</small></td></tr>`).join("")}
+      </tbody></table>` : `<div class="vacio">${icono("check")}<p>No hay dudas pendientes. ¡Todo claro!</p></div>`}</div>`;
+  $$("tr[data-ir]").forEach((tr) => (tr.onclick = () => (location.hash = tr.dataset.ir)));
 }
 
 // ===========================================================================

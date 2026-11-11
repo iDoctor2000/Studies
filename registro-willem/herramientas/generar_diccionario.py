@@ -3,7 +3,7 @@ Genera el DICCIONARIO MAESTRO del registro WILLEM a partir de la hoja
 "Data Dictionary" del CRF original (WILLEM_Registry_CRF.xlsx).
 
 Uso:
-    python3 generar_diccionario.py RUTA_AL_CRF.xlsx  SALIDA.xlsx
+    python3 generar_diccionario.py RUTA_AL_CRF.xlsx  SALIDA.xlsx  [PROPUESTA_AGRUPACION.xlsx]
 
 El diccionario maestro es la "fuente de la verdad" de la aplicación:
 cada fila es un campo del formulario, con su traducción al español,
@@ -290,7 +290,7 @@ ENUMS = {
     22: (range(23, 25), "única"),
     27: (range(28, 36), "única"),
     36: (range(37, 40), "única"),
-    49: (range(50, 54), "única"),
+    49: (range(51, 54), "única"),  # 50 (disfunción VI) es ahora la pregunta llave
     57: (range(58, 60), "única"),
     60: (range(61, 63), "única"),
     65: (range(66, 69), "única"),
@@ -403,19 +403,136 @@ def main(src, dst):
             T[hijos[fila]][1] if padre else "",  # pregunta a la que pertenece
             (disp or "").strip(), es, ayuda, (tipo or "").strip(), unidades,
             ctrl, modo, grupos, cond, vmin, vmax, valor_fijo,
-            "Sí", export, "",
+            "Sí", export, "", fila,
         ])
-    write(dst, salida)
+    write(dst, aplicar_propuesta(salida, SERGIO))
 
 
-CABECERA = [
+# ===========================================================================
+#  Propuesta de agrupación por diagnóstico (Sergio, nov-2026)
+# ===========================================================================
+SERGIO = None  # ruta al Excel "WILLEM_propuesta_agrupacion_por_diagnostico"
+COL_GRUPO = {"HF": "IC", "ATTR": "ATTR", "AS": "EAO", "HCM": "MCH", "MI": "ISQ", "Long QT": "QTL"}
+
+# Reglas acordadas (fila del diccionario -> cambios)
+REGLAS = {
+    5: {"valor_fijo": "HCUVA", "ayuda_ES": "Fijo: HCUVA."},
+    11: {"valor_por_defecto": 1}, 12: {"valor_por_defecto": 1}, 13: {"valor_por_defecto": 1},
+    14: {"valor_por_defecto": "patient_group_retrospective = 1 -> 0 ; patient_group_prospective = 1 -> 1",
+         "ayuda_ES": "Por defecto: No si es retrospectivo, Sí si es prospectivo."},
+    40: {"mostrar_solo_si": "patient_group_prospective = 1"},
+    41: {"mostrar_solo_si": "patient_group_prospective = 1"},
+    49: {"mostrar_solo_si": "heart_failure_lvef = 1", "texto_ES": "Tipo según FEVI"},
+    50: {"texto_ES": "Disfunción ventricular izquierda", "tipo_formulario": "boolean, date"},
+    111: {"mostrar_solo_si": "scintigraphy_procedure_done = 1"},
+    117: {"mostrar_solo_si": "coronary_angiography_done = 1"},
+    122: {"mostrar_solo_si": "coronary_angiography_done = 1"},
+    127: {"mostrar_solo_si": "coronary_angiography_done = 1", "tipo_formulario": "enum",
+          "copiar_de": "coronary_angiography_done_date", "texto_ES": "Flujo TIMI"},
+    133: {"mostrar_solo_si": "biopsy_procedure_done = 1"},
+    135: {"mostrar_solo_si": "genetic_screening_procedure_done = 1"},
+    136: {"oculto": "Sí", "copiar_de": "genetic_screening_hcm_result_positive",
+          "ayuda_ES": "Se calcula: 1 si el resultado genético de MCH es positivo."},
+    137: {"mostrar_solo_si": "genetic_screening_procedure_done = 1", "tipo_formulario": "enum",
+          "copiar_de": "genetic_screening_procedure_done_date", "texto_ES": "Resultado del estudio genético (MCH)"},
+    142: {"oculto": "Sí", "ayuda_ES": "No se mide BNP en nuestro laboratorio: se deja en blanco."},
+    144: {"oculto": "Sí", "ayuda_ES": "No se mide troponina I en nuestro laboratorio: se deja en blanco."},
+    148: {"oculto": "Sí", "ayuda_ES": "La fecha del ECG vendrá con los datos del iECG."},
+    164: {"tipo_formulario": "enum", "copiar_de": "baseline_status", "texto_ES": "Clase funcional NYHA",
+          "ayuda_ES": "La fecha se toma de la valoración basal."},
+    191: {"texto_ES": "Permanente o crónica"},
+    196: {"mostrar_solo_si": "prior_arrhythmias = 1"},
+    198: {"mostrar_solo_si": "implanted_cardiovascular_devices = 1"},
+    199: {"mostrar_solo_si": "implanted_cardiovascular_devices = 1"},
+    200: {"mostrar_solo_si": "implanted_cardiovascular_devices = 1"},
+    201: {"mostrar_solo_si": "implanted_cardiovascular_devices = 1"},
+    223: {"oculto": "Sí", "copiar_de": "chronic_kidney_disease", "ayuda_ES": "Se copia de Enfermedad renal crónica."},
+    225: {"oculto": "Sí"}, 237: {"oculto": "Sí"}, 238: {"oculto": "Sí"},
+}
+
+# Preguntas llave nuevas (variables propias, no se envían). fila -> (código, texto, ¿con fecha?)
+# Si la fila original es una fecha del registro, se oculta y se copia de la fecha de la llave.
+PUERTAS = {
+    110: ("scintigraphy_procedure_done", "¿Se realizó gammagrafía?", True),
+    116: ("coronary_angiography_done", "¿Se realizó coronariografía?", True),
+    132: ("biopsy_procedure_done", "¿Se realizó biopsia?", True),
+    134: ("genetic_screening_procedure_done", "¿Se realizó estudio genético?", True),
+    198: ("implanted_cardiovascular_devices", "¿Tiene algún dispositivo cardiaco implantado?", False),
+}
+
+
+def leer_propuesta(ruta):
+    ws = openpyxl.load_workbook(ruta, read_only=True).worksheets[0]
+    filas = list(ws.iter_rows(values_only=True))
+    cab = [str(c or "").strip() for c in filas[0]]
+    ix = {c: i for i, c in enumerate(cab)}
+    out = {}
+    for r in filas[1:]:
+        if not r or r[0] is None:
+            continue
+        grupos = [g for col, g in COL_GRUPO.items() if str(r[ix[col]] or "").strip() not in ("", "—", "-", "0")]
+        out[int(r[0])] = {"bloque": str(r[ix["Bloque propuesto"]] or "").strip(), "grupos": grupos,
+                          "tipo": str(r[ix["Tipo / unidad"]] or "")}
+    return out
+
+
+def control_formulario(d):
+    tf, es_hijo = d["tipo_formulario"], bool(d["pertenece_a_pregunta"])
+    if d["tipo_seleccion"]:
+        base = "Selección única" if d["tipo_seleccion"] == "única" else "Selección múltiple"
+        return base + (" + fecha" if tf == "date" else "")
+    if d["valor_fijo"]:
+        return "Fijo (no editable)"
+    if tf == "boolean, date":
+        return "Opción (0/1) + fecha si 1" if es_hijo else "Sí/No + fecha si Sí"
+    if tf == "boolean":
+        return "Opción (0/1)" if es_hijo else "Sí/No"
+    return d["control_en_pantalla"]
+
+
+def aplicar_propuesta(salida, ruta):
+    prop = leer_propuesta(ruta) if ruta else {}
+    out = []
+    for lst in salida:
+        d = dict(zip(CABECERA_BASE, lst[:len(CABECERA_BASE)]))
+        fila = lst[len(CABECERA_BASE)]
+        d.update(tipo_formulario=d["tipo"], oculto="", valor_por_defecto="", copiar_de="")
+        p = prop.get(fila)
+        if p:
+            d["pestaña"] = p["bloque"] or d["pestaña"]
+            d["patologias"] = "COMUN" if len(p["grupos"]) == 6 else " ".join(p["grupos"])
+            if d["tipo"] == "boolean, date" and p["tipo"].startswith("boolean ·"):
+                d["tipo_formulario"] = "boolean"  # sin fecha
+        d.update(REGLAS.get(fila, {}))
+        if fila in PUERTAS:
+            cod, texto, con_fecha = PUERTAS[fila]
+            t = "boolean, date" if con_fecha else "boolean"
+            puerta = {k: "" for k in CABECERA}
+            puerta.update({"pestaña": d["pestaña"], "codigo_variable": cod, "codigo_provisional": "LOCAL",
+                           "texto_ES": texto, "tipo": t, "tipo_formulario": t, "patologias": d["patologias"],
+                           "exportar_al_registro": "Solo local",
+                           "columnas_en_exportacion": f"{cod} ; {cod}_date" if con_fecha else cod,
+                           "ayuda_ES": "Pregunta propia de la base (no va al registro): abre los campos de esta prueba."})
+            puerta["control_en_pantalla"] = control_formulario(puerta)
+            out.append(puerta)
+            if con_fecha:  # la fecha del registro sale de la fecha de la pregunta llave
+                d.update(oculto="Sí", copiar_de=f"{cod}_date")
+        d["control_en_pantalla"] = control_formulario(d)
+        out.append(d)
+    for i, d in enumerate(out, 1):
+        d["orden"] = i
+    return out
+
+
+CABECERA_BASE = [
     "orden", "pestaña", "codigo_variable", "codigo_provisional", "pertenece_a_pregunta",
     "texto_original_EN", "texto_ES", "ayuda_ES", "tipo", "formato_unidades_notas",
     "control_en_pantalla", "tipo_seleccion", "patologias", "mostrar_solo_si",
     "valor_min", "valor_max", "valor_fijo", "exportar_al_registro",
     "columnas_en_exportacion", "comentarios_equipo",
 ]
-ANCHOS = [6, 26, 38, 13, 30, 45, 45, 40, 13, 22, 26, 12, 16, 34, 9, 9, 11, 11, 44, 40]
+CABECERA = CABECERA_BASE[:-1] + ["tipo_formulario", "oculto", "valor_por_defecto", "copiar_de", "comentarios_equipo"]
+ANCHOS = [6, 26, 38, 13, 30, 45, 45, 40, 13, 22, 26, 12, 16, 34, 9, 9, 11, 11, 44, 16, 9, 22, 30, 40]
 
 
 def estilo_cabecera(ws, ncols):
@@ -449,12 +566,18 @@ def write(dst, salida):
         ("valor_min / valor_max: rango admitido; fuera de rango la aplicación avisa.", False),
         ("exportar_al_registro: 'Sí' = va al Excel final; 'Solo local' = dato propio que guardamos pero no enviamos.", False),
         ("columnas_en_exportacion: nombre exacto de la(s) columna(s) en el archivo final (1 fila = 1 paciente).", False),
+        ("tipo_formulario: cómo se pregunta en pantalla ('boolean' = Sí/No sin fecha aunque el registro tenga columna de fecha, que irá vacía).", False),
+        ("oculto: 'Sí' = no se muestra en el formulario (se exporta vacío o calculado).", False),
+        ("valor_por_defecto: valor al crear el caso; o regla 'campo = 1 -> valor ; otro = 1 -> valor'.", False),
+        ("copiar_de: el valor se calcula copiando otro campo (p. ej. enfermedad renal = ERC).", False),
         ("", False),
         ("GRUPOS DE PATOLOGÍA", True),
     ] + [(f"{k}: {v}", False) for k, v in GRUPOS.items()] + [
         ("", False),
         ("REGLAS ACORDADAS", True),
         ("• Sí = 1, No = 0. Si se marca Sí en un campo con fecha, se abre la fecha; si No, no.", False),
+        ("• Desconocido y Duda en todos los Sí/No y listas: en el Excel final van vacíos; Duda impide validar el caso.", False),
+        ("• Agrupación por diagnóstico según la propuesta de Sergio (nov-2026).", False),
         ("• Campo que nadie toca = vacío ('no consta'). Solo se pone 0 al pulsar 'Marcar el resto como No'.", False),
         ("• Listas de selección única (raza, sexo, NYHA…): se elige una y se exporta 1 en esa y 0 en las demás.", False),
         ("• Solo ecocardiograma basal; no hay ecos evolutivos.", False),
@@ -470,14 +593,15 @@ def write(dst, salida):
     ws = out.create_sheet("Diccionario")
     ws.append(CABECERA)
     for fila in salida:
-        ws.append(fila)
+        ws.append([fila.get(k, "") for k in CABECERA])
     estilo_cabecera(ws, len(CABECERA))
     for i, w in enumerate(ANCHOS, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     amarillo = PatternFill("solid", fgColor="FFF2CC")
     gris = PatternFill("solid", fgColor="EDEDED")
     rojo = PatternFill("solid", fgColor="F8CBAD")
-    editables = {7, 8, 13, 14, 15, 16, 18, 20}
+    editables = {CABECERA.index(k) + 1 for k in ("texto_ES", "ayuda_ES", "patologias", "mostrar_solo_si", "valor_min", "valor_max",
+                                                 "exportar_al_registro", "tipo_formulario", "oculto", "valor_por_defecto", "copiar_de", "comentarios_equipo")}
     fino = Side(style="thin", color="BFBFBF")
     for r in range(2, ws.max_row + 1):
         es_cab = ws.cell(r, 12).value and not ws.cell(r, 5).value
@@ -491,11 +615,17 @@ def write(dst, salida):
                 cell.fill = gris
         if ws.cell(r, 4).value:
             ws.cell(r, 4).fill = rojo
+        if ws.cell(r, CABECERA.index("oculto") + 1).value == "Sí":
+            ws.cell(r, 7).font = Font(color="999999", italic=True)
         if es_cab:
             ws.cell(r, 7).font = Font(bold=True)
     dv = DataValidation(type="list", formula1='"Sí,Solo local,No"', allow_blank=True)
     ws.add_data_validation(dv)
     dv.add(f"R2:R{ws.max_row}")
+    dv2 = DataValidation(type="list", formula1='"Sí,"', allow_blank=True)
+    ws.add_data_validation(dv2)
+    col_oc = get_column_letter(CABECERA.index("oculto") + 1)
+    dv2.add(f"{col_oc}2:{col_oc}{ws.max_row}")
     ws.auto_filter.ref = f"A1:{get_column_letter(len(CABECERA))}{ws.max_row}"
 
     # --- Variables locales (datos extra) --------------------------------
@@ -504,16 +634,19 @@ def write(dst, salida):
     estilo_cabecera(vl, len(CABECERA))
     for i, w in enumerate(ANCHOS, 1):
         vl.column_dimensions[get_column_letter(i)].width = w
-    vl.append(["", "", "local_ejemplo_fevi_ventriculo_derecho", "", "", "", "Ejemplo: TAPSE (mm)",
-               "Borre esta fila y añada las variables que queráis recoger además del CRF.",
-               "float", "mm", "Número", "", "COMUN", "", 5, 40, "", "Solo local", "local_ejemplo_tapse", ""])
+    ej = {"codigo_variable": "local_ejemplo_tapse", "texto_ES": "Ejemplo: TAPSE (mm)",
+          "ayuda_ES": "Borre esta fila y añada las variables que queráis recoger además del CRF.",
+          "tipo": "float", "tipo_formulario": "float", "formato_unidades_notas": "mm", "control_en_pantalla": "Número",
+          "patologias": "COMUN", "valor_min": 5, "valor_max": 40, "exportar_al_registro": "Solo local",
+          "columnas_en_exportacion": "local_ejemplo_tapse"}
+    vl.append([ej.get(k, "") for k in CABECERA])
 
     # --- Plantilla de exportación ---------------------------------------
     ex = out.create_sheet("Plantilla_exportacion")
     cols = []
     for f in salida:
-        exp = f[18]
-        if exp.startswith("("):
+        exp = f["columnas_en_exportacion"]
+        if exp.startswith("(") or f["exportar_al_registro"] != "Sí":
             continue
         cols += [c.strip() for c in exp.split(";")]
     ex.append(cols)
@@ -556,6 +689,8 @@ def write(dst, salida):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         sys.exit(__doc__)
+    if len(sys.argv) == 4:
+        SERGIO = sys.argv[3]
     main(sys.argv[1], sys.argv[2])

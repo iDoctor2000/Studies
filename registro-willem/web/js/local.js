@@ -7,9 +7,10 @@
 // con la cuenta corporativa de cada persona.
 import { crearXlsx, leerXlsx, descargar } from "./xlsx.js";
 
-const SITE_ID = "ARRIXACA";
-const PRINCIPALES = ["IC", "ISQ", "EAO", "MCH", "ATTR"];
-const TODOS = [...PRINCIPALES, "QTL"];
+const SITE_ID = "HCUVA";
+const MARCAS = ["NC", "DUDA"]; // Desconocido / Duda: en el Excel final van vacíos
+const PRINCIPALES = ["IC", "ISQ", "EAO", "MCH", "ATTR", "QTL"];
+const TODOS = PRINCIPALES;
 const DIAG = { IC: "heart_failure", ISQ: "ischemic_cardiomyopathy", EAO: "aortic_stenosis", MCH: "hypertrophic_cardiomyopathy", ATTR: "amyloidosis_attr", QTL: "long_qt_syndrome" };
 const META = ["numero", "principal", "secundarias", "estado", "creado", "creado_por", "modificado", "modificado_por"];
 const VERSION_ARCHIVO = 1;
@@ -156,6 +157,7 @@ export async function apiLocal(metodo, url, b) {
     }
     if (b.estado && b.estado !== c.estado && ["borrador", "completo", "validado"].includes(b.estado)) {
       if ((b.estado === "validado" || c.estado === "validado") && yo.rol !== "dm") err("Solo un data manager puede validar");
+      if (b.estado === "validado" && Object.values(valores).includes("DUDA")) err("No se puede validar: el caso tiene dudas sin resolver");
       cambios.push(["(estado)", c.estado, b.estado]); c.estado = b.estado;
     }
     if (cambios.length) {
@@ -211,14 +213,20 @@ export async function exportarRegistro(soloValidados = false, formato = "xlsx") 
   const cols = (await columnas(false)).filter((c) => !["site_id", "patient_id", "authored_at"].includes(c));
   const loc = await columnas(true);
   const casos = (await todos("casos")).filter((c) => !soloValidados || c.estado === "validado").sort((a, b) => a.numero - b.numero);
-  const reg = [["site_id", "patient_id", "authored_at", ...cols], ...casos.map((c) => [SITE_ID, c.numero, c.creado, ...cols.map((k) => c.valores[k] ?? "")])];
+  const dic = await diccionario();
+  const copias = Object.fromEntries(dic.campos.filter((d) => String(d.copiar_de || "").trim()).map((d) => [d.codigo_variable, String(d.copiar_de).trim()]));
+  const val = (c, k) => { const x = c.valores[copias[k] || k]; return x == null || MARCAS.includes(x) ? "" : x; };
+  const reg = [["site_id", "patient_id", "authored_at", ...cols], ...casos.map((c) => [SITE_ID, c.numero, c.creado, ...cols.map((k) => val(c, k))])];
   const sello = ahora().replace(/[-:]/g, "").replace("T", "_").slice(0, 13);
   if (formato === "csv") {
     const csv = reg.map((f) => f.map((x) => { const s = String(x ?? ""); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(";")).join("\r\n");
     return descargar(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }), `WILLEM_${SITE_ID}_${sello}.csv`);
   }
   const hojas = [["WILLEM_registro", reg]];
-  if (loc.length) hojas.push(["Solo_local_NO_ENVIAR", [["patient_id", ...loc], ...casos.map((c) => [c.numero, ...loc.map((k) => c.valores[k] ?? "")])]]);
+  if (loc.length) hojas.push(["Solo_local_NO_ENVIAR", [["patient_id", ...loc], ...casos.map((c) => [c.numero, ...loc.map((k) => val(c, k))])]]);
+  const marcas = casos.flatMap((c) => Object.entries(c.valores).filter(([, x]) => MARCAS.includes(x)).sort()
+    .map(([k, x]) => [c.numero, k, x === "NC" ? "Desconocido" : "Duda", c.valores[k + "_duda_nota"] || ""]));
+  if (marcas.length) hojas.push(["Desconocido_Duda_NO_ENVIAR", [["patient_id", "variable", "estado", "nota_duda"], ...marcas]]);
   descargar(crearXlsx(hojas), `WILLEM_${SITE_ID}_${sello}.xlsx`);
 }
 

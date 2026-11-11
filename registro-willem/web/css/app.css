@@ -527,3 +527,21 @@ textarea.inp { width: 100%; height: auto; min-height: 76px; padding: 10px 12px; 
 .carpeta-cta p { margin: 0 0 14px; }
 .pasos-guia { margin: 10px 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; color: var(--ink-2); font-size: 14px; }
 .pasos-guia code, .carpeta-cta code, .aviso-local code { font-family: var(--mono); font-size: 12.5px; background: var(--surface-2); padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); color: var(--ink); }
+
+/* ---------- Desconocido / Duda ---------- */
+.marcas-bt { display: inline-flex; gap: 4px; margin-left: auto; }
+.mb { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 9px; border-radius: 9px; border: 1px dashed var(--line-2);
+  background: transparent; color: var(--ink-3); font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s; }
+.mb .ico { width: 15px; height: 15px; }
+.mb span { display: none; }
+.mb:hover span, .mb.on span { display: inline; }
+.mb:hover { color: var(--ink-2); border-color: var(--ink-3); }
+.mb.on.nc { border-style: solid; background: var(--surface-2); color: var(--ink); border-color: var(--ink-3); }
+.mb.on.duda { border-style: solid; background: var(--warn-soft); color: var(--warn); border-color: var(--warn); }
+.nota-duda { display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 8px; color: var(--warn); animation: entrar .2s ease both; }
+.nota-duda .inp { flex: 1; border-color: color-mix(in srgb, var(--warn) 50%, var(--line-2)); }
+.campo.con-duda { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); background: color-mix(in srgb, var(--warn) 5%, var(--surface)); }
+.campo.con-duda::before { content: ""; position: absolute; left: -1px; top: 12px; bottom: 12px; width: 3px; border-radius: 0 3px 3px 0; background: var(--warn); }
+.duda-pill { --c: #fbbf24; color: #fff !important; background: rgba(245, 158, 11, .35) !important; border-color: rgba(251, 191, 36, .6) !important; }
+.nav .contador.aviso { background: #f59e0b; color: #1c1917; font-weight: 700; }
+.g-enf { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }

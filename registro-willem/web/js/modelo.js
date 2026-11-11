@@ -39,6 +39,7 @@ export function construirModelo(dic) {
   let grupo = null;
   const filas = [...dic.campos, ...dic.locales];
   for (const r of filas) {
+    if (/^s[ií]$/i.test(txt(r.oculto))) { grupo = null; continue; } // campos ocultos: no se muestran
     const codigo = txt(r.codigo_variable);
     const ctrl = txt(r.control_en_pantalla);
     const base = {
@@ -49,7 +50,8 @@ export function construirModelo(dic) {
       pestana: txt(r["pestaña"]) || "Otros", local: !!r.local, provisional: !!txt(r.codigo_provisional),
       min: r.valor_min === null || r.valor_min === "" || r.valor_min === undefined ? null : +r.valor_min,
       max: r.valor_max === null || r.valor_max === "" || r.valor_max === undefined ? null : +r.valor_max,
-      unidad: unidad(r), fijo: txt(r.valor_fijo), tipo: txt(r.tipo),
+      unidad: unidad(r), fijo: txt(r.valor_fijo), tipo: txt(r.tipo_formulario) || txt(r.tipo),
+      defecto: r.valor_por_defecto === null || r.valor_por_defecto === undefined ? "" : r.valor_por_defecto,
     };
     if (txt(r.tipo_seleccion)) {
       grupo = { ...base, tipoCampo: txt(r.tipo_seleccion).startsWith("m") ? "multi" : "single",
@@ -58,7 +60,7 @@ export function construirModelo(dic) {
       continue;
     }
     if (txt(r.pertenece_a_pregunta) && grupo) {
-      grupo.opciones.push({ codigo, etiqueta: base.etiqueta, conFecha: /date/.test(base.tipo), ayuda: base.ayuda });
+      grupo.opciones.push({ codigo, etiqueta: base.etiqueta, conFecha: /date/.test(base.tipo), ayuda: base.ayuda, defecto: base.defecto });
       continue;
     }
     grupo = null;
@@ -78,7 +80,8 @@ export function construirModelo(dic) {
     porCodigo[it.codigo] = it;
     (it.opciones || []).forEach((o) => (porCodigo[o.codigo] = { ...o, padre: it }));
   }
-  return { items, porCodigo, cargado: dic.cargado };
+  const pestanas = [...new Set(items.map((i) => i.pestana))];
+  return { items, porCodigo, pestanas, cargado: dic.cargado };
 }
 
 const quitarNumero = (s) => s.replace(/^\d+\.\s*/, "");
@@ -93,17 +96,18 @@ export function pestanasDelCaso(modelo, caso) {
 
   // Campos COMUNES de los que dependen campos de una enfermedad (p. ej. "¿IAM?")
   // se muestran dentro de la pestaña de esa enfermedad.
+  // También los campos comunes que dependen del diagnóstico (p. ej. "fecha de diagnóstico de IC").
+  const iniciales = new Set(modelo.pestanas.slice(0, 2));
   const atraidos = {};
   for (const g of activos) {
     for (const it of modelo.items) {
       if (it.grupos.includes(g)) {
         for (const ref of it.cond.refs) {
           const dep = modelo.porCodigo[ref];
-          if (dep && !dep.padre && dep.grupos.includes("COMUN") && !DIAG_CODIGOS.has(ref) && !(ref in atraidos)) {
-            if (!dep.pestana.startsWith("0") && !dep.pestana.startsWith("1")) atraidos[ref] = g;
-          }
+          if (dep && !dep.padre && dep.grupos.includes("COMUN") && !DIAG_CODIGOS.has(ref) && !(ref in atraidos) && !iniciales.has(dep.pestana)) atraidos[ref] = g;
         }
       }
+      if (it.grupos.includes("COMUN") && it.cond.refs.includes(DIAG[g]) && !(it.codigo in atraidos)) atraidos[it.codigo] = g;
     }
   }
 
@@ -116,7 +120,7 @@ export function pestanasDelCaso(modelo, caso) {
   };
 
   // Orden: datos del caso -> principal -> secundarias -> resto de pestañas comunes
-  const pest0 = modelo.items.find((i) => i.pestana.startsWith("0"))?.pestana || "0. Datos del caso";
+  const pest0 = modelo.pestanas[0] || "Datos del caso";
   tabs.set("caso", { id: "caso", titulo: quitarNumero(pest0), bloques: new Map() });
   for (const g of activos) tabs.set(g, { id: g, titulo: ENFERMEDADES[g]?.nombre || g, grupo: g, principal: g === caso.principal, bloques: new Map() });
 
@@ -129,7 +133,7 @@ export function pestanasDelCaso(modelo, caso) {
     } else if (atraidos[it.codigo]) {
       add(atraidos[it.codigo], null, {}, quitarNumero(it.pestana), it);
     } else if (it.grupos.includes("COMUN")) {
-      const id = it.pestana.startsWith("0") ? "caso" : "p:" + it.pestana;
+      const id = it.pestana === pest0 ? "caso" : "p:" + it.pestana;
       add(id, quitarNumero(it.pestana), {}, "", it);
     }
   }
@@ -145,11 +149,21 @@ export function visible(it, v) {
   return it.cond.fn(v);
 }
 
+// Respuestas especiales en preguntas Sí/No y listas
+export const NC = "NC";     // Desconocido: se buscó y no consta (cuenta como respondido)
+export const DUDA = "DUDA"; // Duda: pendiente de revisar por un data manager (no cuenta)
+export const esMarca = (x) => x === NC || x === DUDA;
+export const marcaDe = (it, v) => (it.tipoCampo === "single" || it.tipoCampo === "multi" ? v[it.codigo] : esMarca(v[it.codigo]) ? v[it.codigo] : null);
+export const admiteMarcas = (it) => ["sino", "sinofecha", "single", "multi"].includes(it.tipoCampo);
+
 /** Cuenta campos respondidos / totales en una lista de items visibles. */
 export function progresoItems(items, v) {
   let tot = 0, ok = 0;
   for (const it of items) {
     if (!visible(it, v)) continue;
+    const m = admiteMarcas(it) ? marcaDe(it, v) : null;
+    if (m === NC) { tot++; ok++; continue; }
+    if (m === DUDA) { tot++; continue; }
     switch (it.tipoCampo) {
       case "fijo": case "caso": case "auto": case "texto": continue;
       case "single": tot++; if (it.opciones.some((o) => v[o.codigo] === 1)) ok++; break;
@@ -178,11 +192,47 @@ export function rellenarNo(items, v) {
     if ((it.tipoCampo === "sino" || it.tipoCampo === "sinofecha") && (v[it.codigo] === undefined || v[it.codigo] === null)) {
       cambios[it.codigo] = 0;
     }
-    if (it.tipoCampo === "multi" && it.opciones.every((o) => v[o.codigo] === undefined || v[o.codigo] === null)) {
+    if (it.tipoCampo === "multi" && !esMarca(v[it.codigo]) && it.opciones.every((o) => v[o.codigo] === undefined || v[o.codigo] === null)) {
       it.opciones.forEach((o) => (cambios[o.codigo] = 0));
     }
   }
   return cambios;
+}
+
+/** Dudas abiertas de un caso: [{codigo, etiqueta, pestana, nota}] */
+export function dudasDelCaso(modelo, caso) {
+  const out = [];
+  for (const t of pestanasDelCaso(modelo, caso)) {
+    for (const b of t.bloques) for (const it of b.items) {
+      if (admiteMarcas(it) && visible(it, caso.valores) && marcaDe(it, caso.valores) === DUDA) {
+        out.push({ codigo: it.codigo, etiqueta: it.etiqueta, pestana: t.id, tituloPestana: t.titulo, nota: caso.valores[it.codigo + "_duda_nota"] || "" });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Valores por defecto (columna valor_por_defecto del diccionario).
+ *  · un valor fijo ("1", "HCUVA") se aplica al crear el caso;
+ *  · una regla "a = 1 -> 0 ; b = 1 -> 1" se aplica cuando cambia a o b y el campo está vacío.
+ */
+export function valoresPorDefecto(modelo, v, { soloReglas = false, cambiados = null } = {}) {
+  const out = {};
+  const todos = modelo.items.flatMap((it) => [it, ...(it.opciones || [])]);
+  for (const it of todos) {
+    const d = String(it.defecto ?? "").trim();
+    if (!d || (v[it.codigo] !== undefined && v[it.codigo] !== null)) continue;
+    if (d.includes("->")) {
+      for (const regla of d.split(";")) {
+        const m = regla.match(/([a-z0-9_]+)\s*=\s*(\S+)\s*->\s*(\S+)/i);
+        if (!m) continue;
+        if (cambiados && !(m[1] in cambiados)) continue;
+        if (String(v[m[1]]) === m[2]) { out[it.codigo] = isNaN(+m[3]) ? m[3] : +m[3]; break; }
+      }
+    } else if (!soloReglas) out[it.codigo] = isNaN(+d) ? d : +d;
+  }
+  return out;
 }
 
 export { GRUPOS };

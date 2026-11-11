@@ -183,7 +183,7 @@ export function extraer(texto, modelo) {
   if (m) {
     const cods = [0, 1, 2, 3].map((g) => "scintigraphy_perugini_score_grade_" + g);
     push({ id: "perugini", codigo: cods[0], titulo: "Grado de Perugini", valorTexto: "Grado " + m[1],
-      cambios: Object.fromEntries(cods.map((c, i) => [c, i === +m[1] ? 1 : 0])), frag: fragmento(texto, m.index, m.index + m[0].length) });
+      cambios: { scintigraphy_procedure_done: 1, ...Object.fromEntries(cods.map((c, i) => [c, i === +m[1] ? 1 : 0])) }, frag: fragmento(texto, m.index, m.index + m[0].length) });
   }
 
   // TIMI
@@ -191,7 +191,7 @@ export function extraer(texto, modelo) {
   if (m) {
     const cods = [0, 1, 2, 3].map((g) => "timi_coronary_grade_flow_" + g);
     push({ id: "timi", codigo: cods[0], titulo: "Flujo TIMI", valorTexto: "TIMI " + m[1],
-      cambios: Object.fromEntries(cods.map((c, i) => [c, i === +m[1] ? 1 : 0])), frag: fragmento(texto, m.index, m.index + m[0].length) });
+      cambios: { coronary_angiography_done: 1, ...Object.fromEntries(cods.map((c, i) => [c, i === +m[1] ? 1 : 0])) }, frag: fragmento(texto, m.index, m.index + m[0].length) });
   }
 
   // Selecciones únicas
@@ -206,6 +206,7 @@ export function extraer(texto, modelo) {
     const cambios = {};
     if (padre.tipoCampo === "single") padre.opciones.forEach((o) => (cambios[o.codigo] = o.codigo === codigo ? 1 : 0));
     else cambios[codigo] = 1;
+    if (padre.codigo === "heart_failure_type") cambios.heart_failure_lvef = 1; // pregunta llave del tipo según FEVI
     push({ id: codigo, codigo, titulo: padre.etiqueta, valorTexto: op.etiqueta, cambios, frag: fragmento(texto, r.index, r.index + r[0].length) });
   }
 
