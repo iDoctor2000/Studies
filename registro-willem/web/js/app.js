@@ -185,7 +185,14 @@ function aplicarTema() {
 // ===========================================================================
 //  Login / configuración inicial
 // ===========================================================================
-const ECG_PATH = "M0 80 H180 l12 -6 l10 6 H260 l8 10 l12 -70 l14 96 l10 -36 H380 q18 -22 36 0 H560 l12 -6 l10 6 H640 l8 10 l12 -70 l14 96 l10 -36 H760 q18 -22 36 0 H940 l12 -6 l10 6 H1020 l8 10 l12 -70 l14 96 l10 -36 H1140 q18 -22 36 0 H1400";
+// Electrocardiograma en bucle: un latido (onda P, QRS y onda T) cada 380 unidades, repetido.
+// La línea se desplaza un latido por ciclo y vuelve a empezar sin que se note el salto.
+const LATIDO = 380;
+const ECG_PATH = "M0 80 " + Array.from({ length: 6 }, (_, k) => {
+  const x = k * LATIDO;
+  return `H${x} l12 -6 l10 6 H${x + 80} l8 10 l12 -70 l14 96 l10 -36 H${x + 200} q18 -22 36 0 H${x + LATIDO}`;
+}).join(" ");
+const ecgSvg = (clase) => `<svg class="${clase}" viewBox="0 0 1400 160" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><path class="ecg-mov" d="${ECG_PATH}"/></svg>`;
 
 function heroe() {
   return `<div class="heroe">
@@ -193,7 +200,7 @@ function heroe() {
       <div class="logo">${icono("logo")}</div>
       <div><b>WILLEM</b><span>H.C.U. Virgen de la Arrixaca</span></div>
     </div>
-    <svg class="ecg" viewBox="0 0 1400 160" preserveAspectRatio="none"><defs><linearGradient id="gradEcg" x1="0" x2="1"><stop offset="0" stop-color="#5eead4" stop-opacity=".1"/><stop offset=".5" stop-color="#5eead4"/><stop offset="1" stop-color="#a5b4fc"/></linearGradient></defs><path d="${ECG_PATH}"/></svg>
+    ${ecgSvg("ecg")}
     <div>
       <h1>Registro clínico de <span>cardiopatías</span></h1>
       <p>Insuficiencia cardiaca, cardiopatía isquémica, estenosis aórtica, miocardiopatía hipertrófica y amiloidosis ATTR. Todo gira en torno a la enfermedad principal de cada paciente.</p>
@@ -396,7 +403,7 @@ async function pPanel() {
 
   $("#contenido").innerHTML = `
     <div class="saludo">
-      <svg class="ecg-fondo" viewBox="0 0 1400 160" preserveAspectRatio="none"><path d="${ECG_PATH}"/></svg>
+      ${ecgSvg("ecg-fondo")}
       <h2>${saludo}, ${esc(S.yo.nombre.replace(/\(.*?\)/, "").split(" ")[0])}</h2>
       <p>${tot ? `Hay <b>${tot}</b> casos en el registro y la completitud media es del <b>${media}%</b>.` : "Todavía no hay casos. Empiece creando el primero."}
       ${mios.length ? ` Tiene <b>${mios.length}</b> caso${mios.length > 1 ? "s" : ""} en borrador.` : ""}</p>

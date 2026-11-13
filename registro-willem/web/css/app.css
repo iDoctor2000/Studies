@@ -172,9 +172,11 @@ a { color: var(--brand); text-decoration: none; }
 .saludo .btn { background: rgba(255, 255, 255, .12); color: #fff; border-color: rgba(255, 255, 255, .18); backdrop-filter: blur(6px); }
 .saludo .btn.blanco { background: #fff; color: #0b2033; }
 .ecg-fondo { position: absolute; right: -10px; bottom: 6px; width: 62%; height: 120px; opacity: .55; pointer-events: none; }
-.ecg-fondo path { fill: none; stroke: #5eead4; stroke-width: 2; stroke-dasharray: 1400; stroke-dashoffset: 1400; animation: trazo 3.6s ease-out forwards, latido 3.6s 3.6s ease-in-out infinite; }
-@keyframes trazo { to { stroke-dashoffset: 0; } }
-@keyframes latido { 50% { opacity: .55; } }
+.ecg-fondo path { fill: none; stroke: #5eead4; stroke-width: 2; }
+/* Monitor: la traza avanza en bucle (un latido por ciclo ≈ 55 lpm) y se difumina en los bordes */
+.ecg, .ecg-fondo { -webkit-mask-image: linear-gradient(90deg, transparent, #000 20%, #000 80%, transparent); mask-image: linear-gradient(90deg, transparent, #000 20%, #000 80%, transparent); }
+.ecg-mov { animation: monitor 1.1s linear infinite; }
+@keyframes monitor { from { transform: translateX(0); } to { transform: translateX(-380px); } }
 
 .kpi { padding: 18px 20px; display: flex; gap: 16px; align-items: center; }
 .kpi .ic { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; background: var(--brand-soft); color: var(--brand); flex: none; }
@@ -468,7 +470,7 @@ textarea.inp { width: 100%; height: auto; min-height: 76px; padding: 10px 12px; 
 .login .heroe h1 span { background: linear-gradient(90deg, #5eead4, #a5b4fc); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .login .heroe p { color: rgba(255, 255, 255, .72); max-width: 460px; font-size: 16px; }
 .login .heroe .ecg { position: absolute; left: 0; right: 0; top: 46%; width: 100%; height: 160px; opacity: .8; }
-.login .heroe .ecg path { fill: none; stroke: url(#gradEcg); stroke-width: 2.5; stroke-dasharray: 2600; stroke-dashoffset: 2600; animation: trazo 4.5s ease-out forwards; filter: drop-shadow(0 0 6px rgba(94, 234, 212, .6)); }
+.login .heroe .ecg path { fill: none; stroke: #5eead4; stroke-width: 2.5; stroke-linejoin: round; filter: drop-shadow(0 0 6px rgba(94, 234, 212, .7)); }
 .login .heroe .sellos { display: flex; gap: 10px; flex-wrap: wrap; }
 .login .heroe .sellos span { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; padding: 7px 12px; border-radius: 99px; background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .14); }
 .login .heroe .sellos .ico { width: 16px; height: 16px; color: #5eead4; }
@@ -501,7 +503,7 @@ textarea.inp { width: 100%; height: auto; min-height: 76px; padding: 10px 12px; 
 .cargando { display: grid; place-items: center; min-height: 60vh; color: var(--ink-3); }
 .latido-logo { width: 64px; height: 64px; color: var(--brand-2); animation: pulso 1.2s ease-in-out infinite; }
 @keyframes pulso { 50% { transform: scale(1.12); opacity: .7; } }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } .ecg path, .ecg-fondo path { stroke-dashoffset: 0 !important; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
 /* ---------- Modo navegador ---------- */
 .estado-carpeta { display: flex; gap: 10px; align-items: center; text-align: left; width: 100%; padding: 10px 12px; border-radius: 12px; cursor: pointer;
