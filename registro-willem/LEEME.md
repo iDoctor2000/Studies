@@ -20,14 +20,14 @@ La carpeta `web/` también puede publicarse tal cual en GitHub Pages (funciona e
 
 ## Versión web central (GitHub Pages) y envío al registro
 
-- Dirección para todo el equipo: **https://idoctor2000.github.io/studies/** (se publica sola, mediante
+- Dirección para todo el equipo: **https://idoctor2000.github.io/Studies/** (se publica sola, mediante
   `.github/workflows/pages.yml`, cada vez que cambia `registro-willem/web/`). Solo contiene el programa;
   los datos de los pacientes nunca se suben a GitHub.
 - **Enviar al registro** (botón en cada caso): inicia sesión con la cuenta del SMS y escribe la fila del caso
   en el Excel corporativo (tabla `WILLEM`, formato final). Reenviar actualiza la misma fila.
 - Configuración (una vez): `web/datos/envio.json` con `clientId` y `tenantId` de la aplicación registrada por
   Informática y `excelUrl` del Excel. En la aplicación registrada debe figurar como URI de redirección (SPA):
-  `https://idoctor2000.github.io/studies/auth.html`. Permiso delegado: `Files.ReadWrite.All`.
+  `https://idoctor2000.github.io/Studies/auth.html`. Permiso delegado: `Files.ReadWrite.All`.
 - Formato: Sí = 1, No = 0, Desconocido/Duda = vacío. Columnas de fecha de un Sí/No: la fecha, 0 si se contestó
   sin fecha, vacío si es Desconocido o no se contestó.
 - La carpeta compartida (Excel por persona + "Unir casos") sigue funcionando como copia de seguridad.
