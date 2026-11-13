@@ -108,12 +108,49 @@ export function valoresParaDiagnostico(caso, g) {
   return v;
 }
 
+// ---------------------------------------------------------------------------
+// CAMPOS CALCULADOS (columna "calcular" del diccionario)
+//   "CONDICIÓN -> VALOR ; CONDICIÓN -> VALOR | fecha: CAMPO"
+//   · gana la primera regla que se cumple; "y" une condiciones;
+//   · VALOR es un número o el nombre de otro campo;
+//   · si ninguna se cumple, el campo queda en blanco;
+//   · "| fecha: CAMPO": si el resultado es 1, su columna _date toma la fecha de CAMPO.
+// ---------------------------------------------------------------------------
+const OPS = { "<=": (a, b) => a <= b, ">=": (a, b) => a >= b, "!=": (a, b) => a != b, "<": (a, b) => a < b, ">": (a, b) => a > b, "=": (a, b) => a == b };
+const num = (x) => (x !== "" && x !== null && !isNaN(+x) ? +x : x);
+export function aplicarCalculos(dic, v) {
+  for (const f of dic.campos) {
+    const spec = String(f.calcular || "").trim();
+    if (!spec) continue;
+    const [reglas, extra] = spec.split("|");
+    const fecha = (extra || "").match(/fecha:\s*([a-z0-9_]+)/i)?.[1];
+    let res;
+    for (const regla of reglas.split(";")) {
+      const [cond, valor] = regla.split("->").map((x) => x && x.trim());
+      if (!cond || valor === undefined) continue;
+      const cumple = cond.split(/\s+y\s+/i).every((at) => {
+        const m = at.trim().match(/^([a-z0-9_]+)\s*(<=|>=|!=|<|>|=)\s*(\S+)$/i);
+        if (!m) return false;
+        const x = v[m[1]];
+        if (x === undefined || x === null || x === "" || MARCAS.includes(x)) return false;
+        return OPS[m[2]](num(x), num(m[3]));
+      });
+      if (cumple) { res = /^-?\d+(\.\d+)?$/.test(valor) ? +valor : v[valor]; break; }
+    }
+    const cod = String(f.codigo_variable);
+    if (res === undefined || res === null || res === "") { delete v[cod]; delete v[cod + "_date"]; continue; }
+    v[cod] = res;
+    if (fecha) { if (res === 1 && v[fecha]) v[cod + "_date"] = v[fecha]; else delete v[cod + "_date"]; }
+  }
+  return v;
+}
+
 /** [{diagnostico, fila}] — una entrada por diagnóstico del caso. */
 export function filasDelCaso(dic, caso, cabecera = cabeceraRegistro(dic)) {
   const val = valorador(dic, cabecera);
   const campo = campoPorColumna(dic);
   return diagnosticosDelCaso(caso).map((g) => {
-    const vista = { ...caso, valores: valoresParaDiagnostico(caso, g) };
+    const vista = { ...caso, valores: aplicarCalculos(dic, valoresParaDiagnostico(caso, g)) };
     return { diagnostico: g, fila: cabecera.map((c) => (aplicaA(campo[c], g) ? val(vista, c) : "")) };
   });
 }

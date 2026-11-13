@@ -421,16 +421,16 @@ COL_GRUPO = {"HF": "IC", "ATTR": "ATTR", "AS": "EAO", "HCM": "MCH", "MI": "IAM",
 
 # Pestañas del formulario (nov-2026): fusión de bloques. (pestaña, [bloques de Sergio en orden])
 PESTANAS = [
-    ("1. Datos del paciente", ["01. Metadatos", "02. Demografía y hábitos"]),
+    ("1. Datos del paciente", ["01. Metadatos", "02. Demografía y hábitos", "15. Constantes", "15. Clase funcional NYHA", "02. Hábitos"]),
     ("2. Diagnósticos", ["03. Diagnóstico y clasificación", "04. ATTR: marcadores", "05. MI: gravedad y tratamiento"]),
-    ("3. Situación basal y constantes", ["15. Constantes", "15. Clase funcional NYHA"]),
-    ("4. Antecedentes y comorbilidades", ["16. Factores de riesgo cardiovascular", "17. Historia cardiovascular", "19. Comorbilidades"]),
-    ("5. Procedimientos diagnósticos y dispositivos", ["14. Analítica y ECG", "06. Conducción y ECG", "08. Ecocardiograma general",
+    ("3. Antecedentes y comorbilidades", ["16. Factores de riesgo cardiovascular", "17. Historia cardiovascular", "19. Comorbilidades"]),
+    ("4. Procedimientos diagnósticos y dispositivos", ["14. Analítica y ECG", "06. Conducción y ECG", "08. Ecocardiograma general",
                                                        "09. Eco estenosis aórtica", "11. Coronariografía / MI", "05. MI: revascularización",
+                                                       "05. Complicaciones pre o intrahospitalarias",
                                                        "10. ATTR: gammagrafía", "12. ATTR: biopsia", "13. Genética", "18. Dispositivos"]),
-    ("6. Seguimiento", ["20. Seguimiento"]),
+    ("5. Seguimiento", ["20. Seguimiento"]),
 ]
-NOMBRE_BLOQUE = {"Coronariografía / MI": "Coronariografía", "MI: revascularización": "Revascularización coronaria",
+NOMBRE_BLOQUE = {"Demografía y hábitos": "Demografía", "Constantes": "Constantes", "Coronariografía / MI": "Coronariografía", "MI: revascularización": "Revascularización coronaria",
                  "ATTR: gammagrafía": "Gammagrafía", "ATTR: biopsia": "Biopsia", "Genética": "Estudio genético",
                  "Analítica y ECG": "Analítica", "Conducción y ECG": "Conducción (ECG)",
                  "Eco estenosis aórtica": "Ecocardiograma: estenosis aórtica"}
@@ -498,6 +498,51 @@ REGLAS = {
     225: {"oculto": "Sí"}, 237: {"oculto": "Sí"}, 238: {"oculto": "Sí"},
 }
 
+# 3ª ronda de Sergio (nov-2026). Se aplican después de REGLAS.
+# "calcular": reglas "CONDICIÓN -> VALOR ; ..." (la primera que se cumpla); VALOR puede ser un número o un campo.
+#             Opcional al final "| fecha: CAMPO" = si el resultado es 1, su columna _date toma esa fecha.
+FEVI = "echocardiography_lvef"
+REGLAS2 = {
+    # Hábitos (alcohol, actividad física) después de las constantes
+    40: {"pestaña": "02. Hábitos"}, 41: {"pestaña": "02. Hábitos"},
+    # Bajo voltaje: bajo los trastornos de la conducción
+    84: {"pestaña": "06. Conducción y ECG"},
+    90: {"texto_ES": "No"},
+    # Gravedad de la EAo: bajo el gradiente medio aórtico
+    65: {"pestaña": "09. Eco estenosis aórtica"}, 66: {"pestaña": "09. Eco estenosis aórtica"},
+    67: {"pestaña": "09. Eco estenosis aórtica"}, 68: {"pestaña": "09. Eco estenosis aórtica"},
+    # RCP y soporte circulatorio: complicaciones pre o intrahospitalarias
+    87: {"pestaña": "05. Complicaciones pre o intrahospitalarias"},
+    88: {"pestaña": "05. Complicaciones pre o intrahospitalarias"},
+    # IC: disfunción VI y tipo según FEVI se calculan de la FEVI (no se muestran; sí van al Excel)
+    49: {"oculto": "Sí"},
+    50: {"oculto": "Sí", "calcular": f"{FEVI} < 50 -> 1 ; {FEVI} >= 50 -> 0 | fecha: echocardiography_procedure",
+         "ayuda_ES": "Se calcula: 1 si FEVI < 50 %."},
+    51: {"oculto": "Sí", "calcular": f"{FEVI} <= 40 -> 1 ; {FEVI} > 40 -> 0", "ayuda_ES": "Se calcula: FEVI ≤ 40 %."},
+    52: {"oculto": "Sí", "calcular": f"{FEVI} > 40 y {FEVI} < 50 -> 1 ; {FEVI} > 0 -> 0", "ayuda_ES": "Se calcula: FEVI 41–49 %."},
+    53: {"oculto": "Sí", "calcular": f"{FEVI} >= 50 -> 1 ; {FEVI} > 0 -> 0", "ayuda_ES": "Se calcula: FEVI ≥ 50 %."},
+    54: {"oculto": "Sí", "ayuda_ES": "No se recogen otros tipos de IC: siempre en blanco."},
+    # Fecha de la valoración basal = fecha de diagnóstico de la patología de cada fila
+    149: {"oculto": "Sí", "ayuda_ES": "Se calcula: fecha de diagnóstico de la patología de la fila.",
+          "calcular": " ; ".join(f"{d} = 1 -> {d}_diagnosis_date" for d in (
+              "ischemic_cardiomyopathy", "heart_failure", "aortic_stenosis", "hypertrophic_cardiomyopathy",
+              "long_qt_syndrome", "amyloidosis_attr", "myocardial_infarction", "hypertensive_disease"))},
+    # OMI / NOMI según coronariografía y TIMI (solo infarto). Sin coronariografía: -1
+    60: {"oculto": "Sí"},
+    61: {"oculto": "Sí", "ayuda_ES": "Se calcula: TIMI 0 → oclusivo; sin coronariografía → -1.",
+         "calcular": "myocardial_infarction = 1 y coronary_angiography_done = 0 -> -1 ; "
+                     "myocardial_infarction = 1 y timi_coronary_grade_flow_0 = 1 -> 1 ; "
+                     "myocardial_infarction = 1 y timi_coronary_grade_flow_1 = 1 -> 0 ; "
+                     "myocardial_infarction = 1 y timi_coronary_grade_flow_2 = 1 -> 0 ; "
+                     "myocardial_infarction = 1 y timi_coronary_grade_flow_3 = 1 -> 0"},
+    62: {"oculto": "Sí", "ayuda_ES": "Se calcula: TIMI 1-3 → no oclusivo; sin coronariografía → -1.",
+         "calcular": "myocardial_infarction = 1 y coronary_angiography_done = 0 -> -1 ; "
+                     "myocardial_infarction = 1 y timi_coronary_grade_flow_0 = 1 -> 0 ; "
+                     "myocardial_infarction = 1 y timi_coronary_grade_flow_1 = 1 -> 1 ; "
+                     "myocardial_infarction = 1 y timi_coronary_grade_flow_2 = 1 -> 1 ; "
+                     "myocardial_infarction = 1 y timi_coronary_grade_flow_3 = 1 -> 1"},
+}
+
 # Preguntas llave nuevas (variables propias, no se envían). fila -> (código, texto, ¿con fecha?)
 # Si la fila original es una fecha del registro, se oculta y se copia de la fecha de la llave.
 PUERTAS = {
@@ -555,6 +600,7 @@ def aplicar_propuesta(salida, ruta):
         if "IAM" in d["patologias"].split() and "ISQ" not in d["patologias"].split():
             d["patologias"] = (d["patologias"] + " ISQ").strip()
         d.update(REGLAS.get(fila, {}))
+        d.update(REGLAS2.get(fila, {}))
         d["_fila"] = fila
         if fila in PUERTAS:
             cod, texto, con_fecha = PUERTAS[fila]
@@ -612,8 +658,27 @@ def aplicar_propuesta(salida, ruta):
     # Stents justo después del tipo de revascularización
     mover_tras(86, 98)
 
-    # Raza: "Hispana / latina" la primera opción
-    mover_tras(32, 27)
+    # Raza justo debajo del sexo biológico, con "Hispana / latina" la primera opción
+    previo = 24
+    for fila in (27, 32, 28, 29, 30, 31, 33, 34, 35):
+        mover_tras(fila, previo)
+        previo = fila
+
+    # Constantes (y NYHA) bajo el peso, en Datos del paciente; luego los hábitos
+    # (el orden lo fijan los bloques de la pestaña; aquí solo se colocan tras el peso)
+
+    # Bajo voltaje bajo los trastornos de la conducción
+    mover_tras(84, 95)
+
+    # Gravedad de la EAo bajo el gradiente medio
+    previo = 109
+    for fila in (65, 66, 67, 68):
+        mover_tras(fila, previo)
+        previo = fila
+
+    # Complicaciones (RCP, soporte circulatorio) tras los stents
+    mover_tras(87, 86)
+    mover_tras(88, 87)
 
     # Tabaquismo justo debajo de dislipemia (la lista y sus opciones, en orden)
     for fila, tras in ((36, 159), (37, 36), (38, 37), (39, 38)):
@@ -660,8 +725,8 @@ CABECERA_BASE = [
     "valor_min", "valor_max", "valor_fijo", "exportar_al_registro",
     "columnas_en_exportacion", "comentarios_equipo",
 ]
-CABECERA = CABECERA_BASE[:2] + ["bloque"] + CABECERA_BASE[2:-1] + ["tipo_formulario", "oculto", "valor_por_defecto", "copiar_de", "orden_registro", "comentarios_equipo"]
-ANCHOS = [6, 30, 26, 38, 13, 30, 45, 45, 40, 13, 22, 26, 12, 16, 34, 9, 9, 11, 11, 44, 16, 9, 22, 30, 10, 40]
+CABECERA = CABECERA_BASE[:2] + ["bloque"] + CABECERA_BASE[2:-1] + ["tipo_formulario", "oculto", "valor_por_defecto", "copiar_de", "calcular", "orden_registro", "comentarios_equipo"]
+ANCHOS = [6, 30, 26, 38, 13, 30, 45, 45, 40, 13, 22, 26, 12, 16, 34, 9, 9, 11, 11, 44, 16, 9, 22, 30, 50, 10, 40]
 
 
 def estilo_cabecera(ws, ncols):
@@ -699,6 +764,7 @@ def write(dst, salida):
         ("oculto: 'Sí' = no se muestra en el formulario (se exporta vacío o calculado).", False),
         ("valor_por_defecto: valor al crear el caso; o regla 'campo = 1 -> valor ; otro = 1 -> valor'.", False),
         ("copiar_de: el valor se calcula copiando otro campo (p. ej. enfermedad renal = ERC).", False),
+        ("calcular: reglas 'CONDICIÓN -> VALOR ; …' (gana la primera que se cumple; 'y' une condiciones). '| fecha: CAMPO' rellena su _date.", False),
         ("", False),
         ("GRUPOS DE PATOLOGÍA", True),
     ] + [(f"{k}: {v}", False) for k, v in GRUPOS.items()] + [

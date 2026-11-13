@@ -364,6 +364,7 @@ def filas_exportacion(solo_local=False, solo_validados=False):
                     v[cod] = 1 if G == g else 0
                 if g != "OTRO":
                     v.pop("other_disease", None)
+                aplicar_calculos(v)
             fila = [r["numero"]] if solo_local else []
             v.setdefault("site_id", SITE_ID)
             v["site_id"], v["patient_id"] = SITE_ID, r["numero"]
@@ -384,6 +385,62 @@ def filas_exportacion(solo_local=False, solo_validados=False):
                 fila.append("" if x is None or x in MARCAS else x)
             filas.append(fila)
     return filas
+
+
+_OPS = {"<=": lambda a, b: a <= b, ">=": lambda a, b: a >= b, "!=": lambda a, b: a != b,
+        "<": lambda a, b: a < b, ">": lambda a, b: a > b, "=": lambda a, b: a == b}
+
+
+def _num(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return x
+
+
+def aplicar_calculos(v):
+    """Campos calculados (columna 'calcular'): mismas reglas que web/js/registro.js."""
+    for f in diccionario()["campos"]:
+        spec = str(f.get("calcular") or "").strip()
+        if not spec:
+            continue
+        reglas, _, extra = spec.partition("|")
+        m_fecha = re.search(r"fecha:\s*([a-z0-9_]+)", extra, re.I)
+        res = None
+        for regla in reglas.split(";"):
+            if "->" not in regla:
+                continue
+            cond, valor = [x.strip() for x in regla.split("->", 1)]
+            cumple = True
+            for at in re.split(r"\s+y\s+", cond, flags=re.I):
+                m = re.match(r"^([a-z0-9_]+)\s*(<=|>=|!=|<|>|=)\s*(\S+)$", at.strip(), re.I)
+                x = v.get(m.group(1)) if m else None
+                if not m or x in (None, "") or x in MARCAS:
+                    cumple = False
+                    break
+                a, b = _num(x), _num(m.group(3))
+                try:
+                    ok = _OPS[m.group(2)](a, b)
+                except TypeError:
+                    ok = False
+                if not ok:
+                    cumple = False
+                    break
+            if cumple:
+                res = int(valor) if re.fullmatch(r"-?\d+", valor) else (float(valor) if re.fullmatch(r"-?\d+\.\d+", valor) else v.get(valor))
+                break
+        cod = str(f["codigo_variable"])
+        if res in (None, ""):
+            v.pop(cod, None)
+            v.pop(cod + "_date", None)
+            continue
+        v[cod] = res
+        if m_fecha:
+            if res == 1 and v.get(m_fecha.group(1)):
+                v[cod + "_date"] = v[m_fecha.group(1)]
+            else:
+                v.pop(cod + "_date", None)
+    return v
 
 
 def campo_por_columna():
