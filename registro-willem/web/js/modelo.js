@@ -2,9 +2,10 @@
 // Todo pivota en torno a la ENFERMEDAD PRINCIPAL del caso.
 import { ENFERMEDADES } from "./iconos.js";
 
+// Diagnósticos del estudio y su variable en el registro ("Otros" va en texto libre: other_disease)
 export const DIAG = {
-  IC: "heart_failure", ISQ: "ischemic_cardiomyopathy", EAO: "aortic_stenosis",
-  MCH: "hypertrophic_cardiomyopathy", ATTR: "amyloidosis_attr", QTL: "long_qt_syndrome",
+  ISQ: "ischemic_cardiomyopathy", IC: "heart_failure", EAO: "aortic_stenosis", MCH: "hypertrophic_cardiomyopathy",
+  QTL: "long_qt_syndrome", ATTR: "amyloidosis_attr", IAM: "myocardial_infarction", HTA: "hypertensive_disease",
 };
 const DIAG_CODIGOS = new Set(Object.values(DIAG));
 const GRUPOS = Object.keys(DIAG);
@@ -47,7 +48,7 @@ export function construirModelo(dic) {
       ayuda: txt(r.ayuda_ES), original: txt(r.texto_original_EN),
       grupos: txt(r.patologias || "COMUN").toUpperCase().split(/[\s,;]+/).filter(Boolean),
       cond: compilarCondicion(r.mostrar_solo_si), condTexto: txt(r.mostrar_solo_si),
-      pestana: txt(r["pestaña"]) || "Otros", local: !!r.local, provisional: !!txt(r.codigo_provisional),
+      pestana: txt(r["pestaña"]) || "Otros", bloque: txt(r.bloque), local: !!r.local, provisional: !!txt(r.codigo_provisional),
       min: r.valor_min === null || r.valor_min === "" || r.valor_min === undefined ? null : +r.valor_min,
       max: r.valor_max === null || r.valor_max === "" || r.valor_max === undefined ? null : +r.valor_max,
       unidad: unidad(r), fijo: txt(r.valor_fijo), tipo: txt(r.tipo_formulario) || txt(r.tipo),
@@ -86,60 +87,39 @@ export function construirModelo(dic) {
 
 const quitarNumero = (s) => s.replace(/^\d+\.\s*/, "");
 
+/** Diagnósticos del estudio de un caso, en el orden en que se eligieron. */
+export const diagnosticosDe = (caso) => [caso.principal, ...(caso.secundarias || [])].filter(Boolean);
+
 /**
- * Organiza el formulario de un caso en pestañas, según su enfermedad principal
- * y secundarias. Devuelve [{id, titulo, grupo?, bloques:[{subtitulo, items}]}].
+ * Organiza el formulario de un caso en pestañas (columna "pestaña" del diccionario).
+ * Solo se muestran los campos comunes y los de los diagnósticos del caso.
+ * En la pestaña de diagnósticos, los campos se agrupan por diagnóstico.
+ * Devuelve [{id, titulo, bloques:[{subtitulo, grupo?, items}]}].
  */
 export function pestanasDelCaso(modelo, caso) {
-  const activos = [caso.principal, ...caso.secundarias];
-  const v = caso.valores;
-
-  // Campos COMUNES de los que dependen campos de una enfermedad (p. ej. "¿IAM?")
-  // se muestran dentro de la pestaña de esa enfermedad.
-  // También los campos comunes que dependen del diagnóstico (p. ej. "fecha de diagnóstico de IC").
-  const iniciales = new Set(modelo.pestanas.slice(0, 2));
-  const atraidos = {};
-  for (const g of activos) {
-    for (const it of modelo.items) {
-      if (it.grupos.includes(g)) {
-        for (const ref of it.cond.refs) {
-          const dep = modelo.porCodigo[ref];
-          if (dep && !dep.padre && dep.grupos.includes("COMUN") && !DIAG_CODIGOS.has(ref) && !(ref in atraidos) && !iniciales.has(dep.pestana)) atraidos[ref] = g;
-        }
-      }
-      if (it.grupos.includes("COMUN") && it.cond.refs.includes(DIAG[g]) && !(it.codigo in atraidos)) atraidos[it.codigo] = g;
-    }
-  }
-
-  const tabs = new Map();
-  const add = (id, titulo, extra, sub, it) => {
-    if (!tabs.has(id)) tabs.set(id, { id, titulo, ...extra, bloques: new Map() });
-    const t = tabs.get(id);
-    if (!t.bloques.has(sub)) t.bloques.set(sub, []);
-    t.bloques.get(sub).push(it);
+  const activos = diagnosticosDe(caso);
+  const pestDiag = modelo.pestanas.find((p) => /diagn[oó]stico/i.test(p));
+  const grupoDe = (it) => {
+    const g = activos.find((a) => it.grupos.includes(a));
+    if (g) return g;
+    return activos.find((a) => DIAG[a] && it.cond.refs.includes(DIAG[a])) || null;
   };
-
-  // Orden: datos del caso -> principal -> secundarias -> resto de pestañas comunes
-  const pest0 = modelo.pestanas[0] || "Datos del caso";
-  tabs.set("caso", { id: "caso", titulo: quitarNumero(pest0), bloques: new Map() });
-  for (const g of activos) tabs.set(g, { id: g, titulo: ENFERMEDADES[g]?.nombre || g, grupo: g, principal: g === caso.principal, bloques: new Map() });
-
+  const tabs = new Map(modelo.pestanas.map((p) => [p, { id: "p:" + p, titulo: quitarNumero(p), bloques: new Map() }]));
   for (const it of modelo.items) {
     if (DIAG_CODIGOS.has(it.codigo) || it.tipoCampo === "auto") continue;
-    const especificos = it.grupos.filter((g) => g !== "COMUN");
-    const g = activos.find((a) => especificos.includes(a));
-    if (g) {
-      add(g, null, {}, quitarNumero(it.pestana), it);
-    } else if (atraidos[it.codigo]) {
-      add(atraidos[it.codigo], null, {}, quitarNumero(it.pestana), it);
-    } else if (it.grupos.includes("COMUN")) {
-      const id = it.pestana === pest0 ? "caso" : "p:" + it.pestana;
-      add(id, quitarNumero(it.pestana), {}, "", it);
-    }
+    const g = grupoDe(it);
+    if (!it.grupos.includes("COMUN") && !g) continue;
+    const t = tabs.get(it.pestana);
+    if (!t) continue;
+    let clave = it.bloque || "", grupo = null;
+    if (it.pestana === pestDiag && g) { clave = "g:" + g; grupo = g; }
+    if (!t.bloques.has(clave)) t.bloques.set(clave, { subtitulo: grupo ? ENFERMEDADES[grupo]?.nombre || grupo : it.bloque || "", grupo, items: [] });
+    t.bloques.get(clave).items.push(it);
   }
   const out = [];
   for (const t of tabs.values()) {
-    const bloques = [...t.bloques.entries()].map(([subtitulo, items]) => ({ subtitulo, items }));
+    let bloques = [...t.bloques.values()];
+    if (t.id === "p:" + pestDiag) bloques.sort((a, b) => activos.indexOf(a.grupo) - activos.indexOf(b.grupo));
     if (bloques.length) out.push({ ...t, bloques });
   }
   return out;

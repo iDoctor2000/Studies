@@ -1,7 +1,7 @@
 // Registro WILLEM · aplicación web local
 import { icono, ENFERMEDADES, PRINCIPALES } from "./iconos.js";
 import { construirModelo, pestanasDelCaso, progresoPestana, progresoCaso, progresoItems, rellenarNo, visible,
-  NC, DUDA, esMarca, marcaDe, admiteMarcas, dudasDelCaso, valoresPorDefecto } from "./modelo.js";
+  NC, DUDA, esMarca, marcaDe, admiteMarcas, dudasDelCaso, valoresPorDefecto, diagnosticosDe } from "./modelo.js";
 import { anonimizar, extraer, EJEMPLO } from "./importador.js";
 import * as L from "./local.js";
 import * as ENV from "./envio.js";
@@ -413,7 +413,7 @@ async function pPanel() {
   const media = tot ? Math.round(casos.reduce((a, c) => a + c.progreso.pct, 0) / tot) : 0;
   const mios = casos.filter((c) => c.modificado_por === S.yo.usuario && c.estado === "borrador");
   const porEnf = PRINCIPALES.map((g) => {
-    const cs = casos.filter((c) => c.principal === g);
+    const cs = casos.filter((c) => diagnosticosDe(c).includes(g));
     return { g, n: cs.length, pct: cs.length ? Math.round(cs.reduce((a, c) => a + c.progreso.pct, 0) / cs.length) : 0 };
   });
   const ultimos = [];
@@ -436,14 +436,14 @@ async function pPanel() {
       ${[["casos", tot, "Casos registrados"], ["check", comp, "Completos o validados"], ["escudo", val, "Validados por data manager"], ["rayo", media + "%", "Completitud media"]]
         .map(([i, v, e]) => `<div class="tarjeta kpi"><div class="ic">${icono(i)}</div><div><div class="v">${v}</div><div class="e">${e}</div></div></div>`).join("")}
     </div>
-    <div class="bloque-tit" style="margin-top:6px">Por enfermedad principal</div>
+    <div class="bloque-tit" style="margin-top:6px">Por diagnóstico del estudio</div>
     <div class="grid g-enf" style="margin-bottom:18px">
       ${porEnf.map(({ g, n, pct }) => `<a class="enf-card" style="--c:${ENFERMEDADES[g].color}" href="#/casos?enf=${g}">
         <div class="ic">${icono(g)}</div><div class="num">${n}</div><div class="nom">${esc(ENFERMEDADES[g].nombre)}</div>
         <div class="barra-p"><i style="width:${pct}%"></i></div><div class="mini"><span>Completitud</span><b>${pct}%</b></div></a>`).join("")}
     </div>
     <div class="grid g-panel">
-      <div class="tarjeta pad"><h3>Distribución</h3><div class="sub" style="margin-bottom:14px">Casos por enfermedad principal</div>
+      <div class="tarjeta pad"><h3>Distribución</h3><div class="sub" style="margin-bottom:14px">Filas por diagnóstico (un paciente cuenta en cada una de sus patologías)</div>
         <div class="donut-wrap"><div style="position:relative;display:grid;place-items:center">${donut(porEnf.map((x) => ({ v: x.n, c: ENFERMEDADES[x.g].color, t: ENFERMEDADES[x.g].nombre })))}
           <div style="position:absolute;text-align:center"><div style="font-size:26px;font-weight:700">${tot}</div><div class="sub">casos</div></div></div>
           <div class="leyenda">${porEnf.map((x) => `<span><i style="background:${ENFERMEDADES[x.g].color}"></i>${esc(ENFERMEDADES[x.g].corto)}<b>${x.n}</b></span>`).join("")}</div></div>
@@ -466,8 +466,8 @@ async function pCasos(qs) {
   const F = { enf: qs.get("enf") || "", estado: qs.get("estado") || "", q: "" };
   const cont = $("#contenido");
   const pintar = () => {
-    const lista = S.casos.filter((c) => (!F.enf || c.principal === F.enf || c.secundarias.includes(F.enf)) && (!F.estado || c.estado === F.estado) && (!F.q || pad(c.numero).includes(F.q.replace(/\D/g, "")) && F.q.replace(/\D/g, "")));
-    const cuenta = (g) => S.casos.filter((c) => c.principal === g).length;
+    const lista = S.casos.filter((c) => (!F.enf || diagnosticosDe(c).includes(F.enf)) && (!F.estado || c.estado === F.estado) && (!F.q || pad(c.numero).includes(F.q.replace(/\D/g, "")) && F.q.replace(/\D/g, "")));
+    const cuenta = (g) => S.casos.filter((c) => diagnosticosDe(c).includes(g)).length;
     cont.innerHTML = `
       <div class="filtros">
         <div class="buscador">${icono("buscar")}<input id="q" placeholder="Buscar por número de caso…" value="${esc(F.q)}" inputmode="numeric"></div>
@@ -478,11 +478,10 @@ async function pCasos(qs) {
         ${[["", "Todos los estados"], ["borrador", "Borrador"], ["completo", "Completo"], ["validado", "Validado"]].map(([k, t]) => `<span class="chip ${F.estado === k ? "on" : ""}" data-estado="${k}">${t}</span>`).join("")}
       </div>
       <div class="tarjeta">
-        ${lista.length ? `<table class="tabla"><thead><tr><th>Caso</th><th>Enfermedad principal</th><th>Otros diagnósticos</th><th>Completitud</th><th>Estado</th><th>Registro</th><th>Última modificación</th></tr></thead><tbody>
+        ${lista.length ? `<table class="tabla"><thead><tr><th>Caso</th><th>Diagnósticos del estudio</th><th>Completitud</th><th>Estado</th><th>Registro</th><th>Última modificación</th></tr></thead><tbody>
         ${lista.map((c) => `<tr data-n="${c.numero}" style="--c:${ENFERMEDADES[c.principal]?.color}">
           <td><span class="num-caso"><small>#</small>${pad(c.numero)}</span></td>
-          <td>${pillEnf(c.principal)}</td>
-          <td>${c.secundarias.map((s) => pillEnf(s, true)).join(" ") || `<span class="sub">—</span>`}</td>
+          <td><div class="diags-celda">${diagnosticosDe(c).map((g) => pillEnf(g, diagnosticosDe(c).length > 1)).join(" ")}</div></td>
           <td><div style="display:flex;align-items:center;gap:10px">${anillo(c.progreso.pct, 40, 4.5)}<span class="sub">${c.progreso.ok}/${c.progreso.tot}</span></div></td>
           <td>${estadoPill(c.estado)} ${c.dudas.length ? `<span class="pill sec" style="--c:#d97706" title="Dudas sin resolver">${icono("bandera")} ${c.dudas.length}</span>` : ""}</td>
           <td>${pillEnvio(c)}</td>
@@ -501,13 +500,20 @@ async function pCasos(qs) {
 // ===========================================================================
 //  NUEVO CASO (asistente)
 // ===========================================================================
+/** Selector múltiple de diagnósticos (asistente y modal). sel = array en orden de selección. */
+function selectorDiagnosticos(sel, otro) {
+  return `<div class="elige-enf">${PRINCIPALES.map((g) => `<div class="enf-card ${sel.includes(g) ? "sel" : ""}" data-g="${g}" style="--c:${ENFERMEDADES[g].color}">
+      <span class="marca-sel">${icono("check")}</span><div class="ic">${icono(g)}</div><h4>${esc(ENFERMEDADES[g].nombre)}</h4><p>${esc(ENFERMEDADES[g].desc)}</p></div>`).join("")}</div>
+    ${sel.includes("OTRO") ? `<label class="otro-diag"><b>Otros: ¿qué diagnóstico?</b><input class="inp" id="otroTxt" value="${esc(otro || "")}" placeholder="Describa el diagnóstico (y su código CIE-11 si lo conoce)"></label>` : ""}`;
+}
+
 async function pNuevo(qs) {
   barra("Nuevo caso", "Casos ›");
   const proponer = !navegador() || esDM();
-  const W = { paso: 1, numero: +qs.get("n") || (proponer ? (await api("GET", "siguiente")).numero : ""), principal: null, sec: [] };
+  const W = { paso: 1, numero: +qs.get("n") || (proponer ? (await api("GET", "siguiente")).numero : ""), sel: [], otro: "" };
   const cont = $("#contenido");
   const pintar = () => {
-    const pasos = ["Número de caso", "Enfermedad principal", "Otros diagnósticos"];
+    const pasos = ["Número de caso", "Diagnósticos del estudio"];
     let cuerpo = "";
     if (W.paso === 1) {
       cuerpo = `<div class="tarjeta pad" style="max-width:760px">
@@ -515,22 +521,13 @@ async function pNuevo(qs) {
         <div class="sub" style="margin-bottom:18px">Es el número seudonimizado que asigna el data manager en el <b>libro llave</b>. Nunca escriba aquí el CIP, CARM, NHC ni el nombre del paciente.</div>
         <div class="campo-num"><input id="num" value="${W.numero ? pad(W.numero) : ""}" placeholder="0000" inputmode="numeric" maxlength="6"><div class="sub">${W.numero ? "Propuesto: el siguiente libre." : "Escriba el número que le ha dado el data manager."}${esDM() ? `<br><a href="#/llave">${icono("llave")} Asignarlo desde el libro llave</a>` : ""}</div></div>
         <div class="nav-sec"><span></span><button class="btn primario grande" id="sig">Continuar ${icono("flechaD")}</button></div></div>`;
-    } else if (W.paso === 2) {
-      cuerpo = `<div class="sub" style="margin-bottom:14px">El formulario se adapta a la enfermedad principal: solo verá los campos que le corresponden.</div>
-        <div class="elige-enf">${PRINCIPALES.map((g) => `<div class="enf-card ${W.principal === g ? "sel" : ""}" data-g="${g}" style="--c:${ENFERMEDADES[g].color}">
-          <span class="marca-sel">${icono("check")}</span><div class="ic">${icono(g)}</div><h4>${esc(ENFERMEDADES[g].nombre)}</h4><p>${esc(ENFERMEDADES[g].desc)}</p></div>`).join("")}</div>
-        <div class="nav-sec"><button class="btn grande" id="ant">${icono("flechaI")} Atrás</button><button class="btn primario grande" id="sig" ${W.principal ? "" : "disabled"}>Continuar ${icono("flechaD")}</button></div>`;
     } else {
-      const e = ENFERMEDADES[W.principal];
-      cuerpo = `<div class="tarjeta pad" style="max-width:860px">
-        <h3>¿Tiene además alguno de estos diagnósticos?</h3>
-        <div class="sub" style="margin-bottom:16px">Opcional. Se añadirá una pestaña con sus campos específicos.</div>
-        <div class="opciones">${Object.keys(ENFERMEDADES).filter((g) => g !== W.principal).map((g) => `<span class="chip ${W.sec.includes(g) ? "on" : ""}" data-s="${g}" style="--c:${ENFERMEDADES[g].color}">${icono(g)} ${esc(ENFERMEDADES[g].nombre)}</span>`).join("")}</div>
-        <div class="bloque-tit">Resumen</div>
-        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap">
-          <span class="num-caso" style="font-size:22px">#${pad(W.numero)}</span>${pillEnf(W.principal)} ${W.sec.map((s) => pillEnf(s, true)).join(" ")}
-        </div>
-        <div class="nav-sec"><button class="btn grande" id="ant">${icono("flechaI")} Atrás</button><button class="btn color grande" id="crear" style="--c:${e.color}">${icono("check")} Crear caso y empezar</button></div></div>`;
+      cuerpo = `<div class="aviso-local">${icono("info")}<div><b>Marque todas las patologías por las que el paciente entra en el estudio.</b>
+          Solo se preguntan aquí. En el Excel final el paciente saldrá <b>una vez por cada patología</b> (mismo número de caso).</div></div>
+        ${selectorDiagnosticos(W.sel, W.otro)}
+        <div class="nav-sec"><button class="btn grande" id="ant">${icono("flechaI")} Atrás</button>
+          <span style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><span class="num-caso" style="font-size:20px">#${pad(W.numero)}</span>${W.sel.map((g) => pillEnf(g, true)).join(" ")}
+          <button class="btn primario grande" id="crear" ${W.sel.length ? "" : "disabled"}>${icono("check")} Crear caso y empezar</button></span></div>`;
     }
     cont.innerHTML = `<div class="pasos">${pasos.map((p, i) => `<div class="paso ${W.paso === i + 1 ? "on" : W.paso > i + 1 ? "hecho" : ""}"><b>${W.paso > i + 1 ? "✓" : i + 1}</b>${p}</div>`).join("")}</div>${cuerpo}`;
     $("#ant") && ($("#ant").onclick = () => { W.paso--; pintar(); });
@@ -538,22 +535,18 @@ async function pNuevo(qs) {
       const inp = $("#num"); inp.focus(); inp.select();
       const ir = () => { const n = parseInt(inp.value.replace(/\D/g, ""), 10); if (!n) return toast("Escriba un número de caso válido", "mal"); if (S.casos.some((c) => c.numero === n)) return toast(`El caso #${pad(n)} ya existe`, "mal"); W.numero = n; W.paso = 2; pintar(); };
       $("#sig").onclick = ir; inp.onkeydown = (e) => e.key === "Enter" && ir();
-    }
-    if (W.paso === 2) {
-      $$("[data-g]", cont).forEach((x) => (x.onclick = () => { W.principal = x.dataset.g; W.sec = W.sec.filter((s) => s !== W.principal); pintar(); }));
-      $$("[data-g]", cont).forEach((x) => (x.ondblclick = () => { W.principal = x.dataset.g; W.paso = 3; pintar(); }));
-      $("#sig").onclick = () => { W.paso = 3; pintar(); };
-    }
-    if (W.paso === 3) {
-      $$("[data-s]", cont).forEach((x) => (x.onclick = () => { const g = x.dataset.s; W.sec = W.sec.includes(g) ? W.sec.filter((s) => s !== g) : [...W.sec, g]; pintar(); }));
+    } else {
+      $$("[data-g]", cont).forEach((x) => (x.onclick = () => { const g = x.dataset.g; W.sel = W.sel.includes(g) ? W.sel.filter((y) => y !== g) : [...W.sel, g]; pintar(); }));
+      $("#otroTxt")?.addEventListener("input", (ev) => (W.otro = ev.target.value));
       $("#crear").onclick = async () => {
+        if (W.sel.includes("OTRO") && !W.otro.trim()) { toast("Describa el diagnóstico de 'Otros'", "mal"); return $("#otroTxt")?.focus(); }
         try {
-          await api("POST", "casos", { numero: W.numero, principal: W.principal, secundarias: W.sec });
+          await api("POST", "casos", { numero: W.numero, principal: W.sel[0], secundarias: W.sel.slice(1) });
           const def = valoresPorDefecto(S.modelo, {});
+          if (W.sel.includes("OTRO")) def.other_disease = W.otro.trim();
           if (Object.keys(def).length) await api("PUT", "casos/" + W.numero, { valores: def });
           toast(`Caso #${pad(W.numero)} creado`); location.hash = `#/caso/${W.numero}`;
-        }
-        catch (e) { toast(e.message, "mal"); }
+        } catch (e) { toast(e.message, "mal"); }
       };
     }
   };
@@ -571,9 +564,8 @@ async function pCaso(num, tabId) {
   E.caso = await api("GET", "casos/" + num);
   E.pend = {}; E.origen = null;
   const tabs = pestanasDelCaso(S.modelo, E.caso);
-  E.tab = tabs.find((t) => t.id === tabId) ? tabId : tabs.find((t) => t.principal)?.id || tabs[0].id;
-  const e = ENFERMEDADES[E.caso.principal];
-  barra(`Caso #${pad(num)}`, `<a href="#/casos">Casos</a> › ${esc(e.nombre)}`,
+  E.tab = tabs.find((t) => t.id === tabId) ? tabId : tabs[0].id; // siempre empieza por "Datos del paciente"
+  barra(`Caso #${pad(num)}`, `<a href="#/casos">Casos</a> › ${esc(diagnosticosDe(E.caso).map((g) => ENFERMEDADES[g]?.corto || g).join(" · "))}`,
     `<button class="btn" id="bImp">${icono("importar")} Importar informe</button><button class="btn fantasma" id="bHist">${icono("historial")} Historial</button>`);
   $("#bImp").onclick = abrirImportador;
   $("#bHist").onclick = abrirHistorial;
@@ -588,7 +580,8 @@ function pintarCaso(animar = false) {
   const ti = tabs.indexOf(tab);
   const prog = progresoItems(tabs.flatMap((t) => t.bloques.flatMap((b) => b.items)), c.valores);
   const pt = progresoPestana(tab, c.valores);
-  const tColor = tab.grupo ? ENFERMEDADES[tab.grupo].color : e.color;
+  const tColor = e.color;
+  const diags = diagnosticosDe(c);
   let nSec = 0;
   const cont = $("#contenido");
   const scroll = scrollY;
@@ -598,9 +591,10 @@ function pintarCaso(animar = false) {
   cont.innerHTML = `
     <div class="cabecera-caso" style="--c:${e.color}">
       <div class="ic-grande">${icono(c.principal)}</div>
-      <div><div class="t1">Enfermedad principal</div>
-        <div class="t2">${esc(e.nombre)} <span class="num-caso">#${pad(c.numero)}</span></div>
-        <div class="secs">${c.secundarias.map((s) => `<span class="pill sec">${icono(s)} ${esc(ENFERMEDADES[s].nombre)}</span>`).join("")}
+      <div><div class="t1">Diagnóstico${diags.length > 1 ? "s" : ""} del estudio · caso <span class="num-caso">#${pad(c.numero)}</span></div>
+        <div class="t2">${esc(diags.length === 1 ? ENFERMEDADES[diags[0]].nombre : diags.map((g) => ENFERMEDADES[g].corto).join(" · "))}</div>
+        <div class="secs">${diags.length > 1 ? diags.map((g) => `<span class="pill sec">${icono(g)} ${esc(ENFERMEDADES[g].nombre)}</span>`).join("") : ""}
+          ${diags.includes("OTRO") && c.valores.other_disease ? `<span class="pill sec">${icono("OTRO")} ${esc(c.valores.other_disease)}</span>` : ""}
           ${(() => { const d = dudasDelCaso(S.modelo, c); return d.length ? `<a class="pill sec duda-pill" href="#/caso/${c.numero}/${encodeURIComponent(d[0].pestana)}" title="Ir a la primera duda">${icono("bandera")} ${d.length} duda${d.length > 1 ? "s" : ""}</a>` : ""; })()}
           ${soloLectura() ? "" : `<button class="btn pequeno" id="bDiag">${icono("editar")} Diagnósticos</button>`}</div></div>
       <div class="der">
@@ -635,7 +629,8 @@ function pintarCaso(animar = false) {
           <div class="der">${soloLectura() ? "" : `<button class="btn fantasma" id="bRellenarNC" title="Pone Desconocido en todas las preguntas Sí/No y listas sin contestar de esta pestaña">${icono("interrogacion")} Resto: Desconocido</button>
             <button class="btn" id="bRellenar" title="Pone No (0) en todos los Sí/No que estén sin contestar en esta pestaña">${icono("varita")} Marcar el resto como No</button>`}</div>
         </div>
-        <div id="seccion">${tab.bloques.map((b) => `${b.subtitulo ? `<div class="bloque-tit">${esc(b.subtitulo)}</div>` : ""}
+        <div id="seccion">${tab.bloques.filter((b) => b.items.some((it) => visible(it, c.valores))).map((b) => `${b.grupo ? `<div class="bloque-tit bloque-enf" style="--c:${ENFERMEDADES[b.grupo].color}">${icono(b.grupo)} ${esc(b.subtitulo)}</div>`
+          : b.subtitulo ? `<div class="bloque-tit">${esc(b.subtitulo)}</div>` : ""}
           <div class="campos">${b.items.filter((it) => visible(it, c.valores)).map((it) => campoHTML(it, c.valores, animar)).join("")}</div>`).join("")}</div>
         <div class="nav-sec">
           ${ti > 0 ? `<a class="btn grande" href="#/caso/${c.numero}/${encodeURIComponent(tabs[ti - 1].id)}">${icono("flechaI")} ${esc(tabs[ti - 1].titulo)}</a>` : "<span></span>"}
@@ -881,24 +876,27 @@ window.addEventListener("beforeunload", () => vaciarPendientes(true));
 
 async function editarDiagnosticos() {
   const c = E.caso;
-  let P = c.principal, sec = [...c.secundarias];
+  let sel = diagnosticosDe(c), otro = c.valores.other_disease || "";
   await modal({
-    titulo: "Diagnósticos del caso", aceptar: "Guardar",
-    html: `<div class="sub" style="margin-bottom:10px">Enfermedad principal</div><div class="opciones" id="dP"></div>
-      <div class="sub" style="margin:16px 0 10px">Otros diagnósticos</div><div class="opciones" id="dS"></div>
-      <p class="sub" style="margin-top:16px">Si cambia la enfermedad principal, los datos ya introducidos <b>no se borran</b>: simplemente dejan de mostrarse si no corresponden.</p><div class="error"></div>`,
+    titulo: "Diagnósticos del estudio", aceptar: "Guardar",
+    html: `<div class="sub" style="margin-bottom:10px">Marque todas las patologías por las que el paciente está en el estudio (una fila por cada una en el Excel final).</div>
+      <div id="dSel" class="selector-modal"></div>
+      <p class="sub" style="margin-top:12px">Si quita un diagnóstico, sus datos <b>no se borran</b>: simplemente dejan de mostrarse y de exportarse.</p><div class="error"></div>`,
     alAbrir: (m) => {
       const pin = () => {
-        $("#dP", m).innerHTML = PRINCIPALES.map((g) => `<span class="chip ${P === g ? "on" : ""}" data-p="${g}" style="--c:${ENFERMEDADES[g].color}">${icono(g)} ${esc(ENFERMEDADES[g].corto)}</span>`).join("");
-        $("#dS", m).innerHTML = Object.keys(ENFERMEDADES).filter((g) => g !== P).map((g) => `<span class="chip ${sec.includes(g) ? "on" : ""}" data-s="${g}" style="--c:${ENFERMEDADES[g].color}">${icono(g)} ${esc(ENFERMEDADES[g].corto)}</span>`).join("");
-        $$("[data-p]", m).forEach((x) => (x.onclick = () => { P = x.dataset.p; sec = sec.filter((s) => s !== P); pin(); }));
-        $$("[data-s]", m).forEach((x) => (x.onclick = () => { const g = x.dataset.s; sec = sec.includes(g) ? sec.filter((s) => s !== g) : [...sec, g]; pin(); }));
+        $("#dSel", m).innerHTML = `<div class="opciones">${PRINCIPALES.map((g) => `<span class="chip ${sel.includes(g) ? "on" : ""}" data-p="${g}" style="--c:${ENFERMEDADES[g].color}">${icono(g)} ${esc(ENFERMEDADES[g].nombre)}</span>`).join("")}</div>
+          ${sel.includes("OTRO") ? `<label class="otro-diag"><b>Otros: ¿qué diagnóstico?</b><input class="inp" id="otroM" value="${esc(otro)}"></label>` : ""}`;
+        $$("[data-p]", m).forEach((x) => (x.onclick = () => { const g = x.dataset.p; sel = sel.includes(g) ? sel.filter((y) => y !== g) : [...sel, g]; pin(); }));
+        $("#otroM", m)?.addEventListener("input", (ev) => (otro = ev.target.value));
       };
       pin();
     },
     alAceptar: async () => {
+      if (!sel.length) throw new Error("Marque al menos un diagnóstico");
+      if (sel.includes("OTRO") && !otro.trim()) throw new Error("Describa el diagnóstico de 'Otros'");
       await vaciarPendientes();
-      E.caso = await api("PUT", "casos/" + c.numero, { principal: P, secundarias: sec });
+      E.caso = await api("PUT", "casos/" + c.numero, { principal: sel[0], secundarias: sel.slice(1),
+        valores: { other_disease: sel.includes("OTRO") ? otro.trim() : null } });
       toast("Diagnósticos actualizados");
       pCaso(c.numero, E.tab);
     },

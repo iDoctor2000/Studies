@@ -611,3 +611,12 @@ textarea.inp { width: 100%; height: auto; min-height: 76px; padding: 10px 12px; 
 /* Tablas anchas: se desplazan dentro de su tarjeta en cualquier tamaño */
 .tarjeta:has(> .tabla) { overflow-x: auto; }
 .tabla td.codigo { word-break: break-all; }
+
+/* ---------- Diagnósticos múltiples ---------- */
+.bloque-enf { color: var(--c); }
+.bloque-enf .ico { width: 18px; height: 18px; }
+.bloque-enf::after { background: color-mix(in srgb, var(--c) 30%, var(--line)); }
+.otro-diag { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; font-size: 14px; max-width: 640px; }
+.otro-diag .inp { width: 100%; }
+.diags-celda { display: flex; flex-wrap: wrap; gap: 4px; }
+.selector-modal .opciones { gap: 8px; }

@@ -12,6 +12,7 @@ qué patologías lo usan, cuándo se muestra y cómo se exporta.
 Una vez revisado por el equipo clínico, se edita directamente el Excel
 de salida (no hace falta volver a ejecutar este script).
 """
+import re
 import sys
 import openpyxl
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
@@ -30,12 +31,15 @@ from openpyxl.utils import get_column_letter
 # ---------------------------------------------------------------------------
 GRUPOS = {
     "COMUN": "Todos los pacientes",
-    "IC": "heart_failure = 1",
-    "ISQ": "ischemic_cardiomyopathy = 1 O myocardial_infarction = 1",
-    "EAO": "aortic_stenosis = 1",
-    "MCH": "hypertrophic_cardiomyopathy = 1",
-    "ATTR": "amyloidosis_attr = 1",
-    "QTL": "long_qt_syndrome = 1",
+    "ISQ": "Cardiopatía isquémica (ischemic_cardiomyopathy = 1)",
+    "IC": "Insuficiencia cardiaca (heart_failure = 1)",
+    "EAO": "Estenosis aórtica (aortic_stenosis = 1)",
+    "MCH": "Miocardiopatía hipertrófica (hypertrophic_cardiomyopathy = 1)",
+    "QTL": "Síndrome de QT largo (long_qt_syndrome = 1)",
+    "ATTR": "Amiloidosis cardiaca por transtiretina (amyloidosis_attr = 1)",
+    "IAM": "Infarto de miocardio (myocardial_infarction = 1)",
+    "HTA": "Cardiopatía hipertensiva (hypertensive_disease = 1)",
+    "OTRO": "Otros (other_disease)",
 }
 
 # ---------------------------------------------------------------------------
@@ -412,7 +416,26 @@ def main(src, dst):
 #  Propuesta de agrupación por diagnóstico (Sergio, nov-2026)
 # ===========================================================================
 SERGIO = None  # ruta al Excel "WILLEM_propuesta_agrupacion_por_diagnostico"
-COL_GRUPO = {"HF": "IC", "ATTR": "ATTR", "AS": "EAO", "HCM": "MCH", "MI": "ISQ", "Long QT": "QTL"}
+COL_GRUPO = {"HF": "IC", "ATTR": "ATTR", "AS": "EAO", "HCM": "MCH", "MI": "IAM", "Long QT": "QTL"}
+
+# Cardiopatía isquémica (sin infarto) comparte con el infarto la parte coronaria
+FILAS_ISQ = {86, 96, 97, 98} | set(range(116, 132))
+
+# Pestañas del formulario (nov-2026): fusión de bloques. (pestaña, [bloques de Sergio en orden])
+PESTANAS = [
+    ("1. Datos del paciente", ["01. Metadatos", "02. Demografía y hábitos"]),
+    ("2. Diagnósticos", ["03. Diagnóstico y clasificación", "04. ATTR: marcadores", "05. MI: gravedad y tratamiento"]),
+    ("3. Situación basal y constantes", ["15. Constantes"]),
+    ("4. Antecedentes y comorbilidades", ["16. Factores de riesgo cardiovascular", "17. Historia cardiovascular", "19. Comorbilidades"]),
+    ("5. Procedimientos diagnósticos y dispositivos", ["14. Analítica y ECG", "06. Conducción y ECG", "08. Ecocardiograma general",
+                                                       "09. Eco estenosis aórtica", "11. Coronariografía / MI", "05. MI: revascularización",
+                                                       "10. ATTR: gammagrafía", "12. ATTR: biopsia", "13. Genética", "18. Dispositivos"]),
+    ("6. Seguimiento", ["20. Seguimiento"]),
+]
+NOMBRE_BLOQUE = {"Coronariografía / MI": "Coronariografía", "MI: revascularización": "Revascularización coronaria",
+                 "ATTR: gammagrafía": "Gammagrafía", "ATTR: biopsia": "Biopsia", "Genética": "Estudio genético",
+                 "Analítica y ECG": "Analítica", "Conducción y ECG": "Conducción (ECG)",
+                 "Eco estenosis aórtica": "Ecocardiograma: estenosis aórtica"}
 
 # Reglas acordadas (fila del diccionario -> cambios)
 REGLAS = {
@@ -447,6 +470,14 @@ REGLAS = {
     200: {"mostrar_solo_si": "implanted_cardiovascular_devices = 1"},
     201: {"mostrar_solo_si": "implanted_cardiovascular_devices = 1"},
     223: {"oculto": "Sí", "copiar_de": "chronic_kidney_disease", "ayuda_ES": "Se copia de Enfermedad renal crónica."},
+    # Los diagnósticos solo se preguntan al principio: los duplicados se copian
+    81: {"oculto": "Sí", "ayuda_ES": "Se rellena al elegir 'Otros' en los diagnósticos del caso."},
+    173: {"oculto": "Sí", "copiar_de": "long_qt_syndrome", "ayuda_ES": "Se copia del diagnóstico inicial."},
+    222: {"oculto": "Sí", "copiar_de": "heart_failure", "ayuda_ES": "Se copia del diagnóstico inicial."},
+    # Seguimiento: el fallecimiento es un evento más, con su fecha
+    228: {"texto_ES": "Fallecimiento", "tipo_formulario": "boolean, date"},
+    229: {"oculto": "Sí", "copiar_de": "death_date", "ayuda_ES": "Fecha del evento 'Fallecimiento'."},
+    231: {"texto_ES": "Eventos durante el seguimiento", "ayuda_ES": "Marque todos los que haya habido y la fecha de cada uno."},
     225: {"oculto": "Sí"}, 237: {"oculto": "Sí"}, 238: {"oculto": "Sí"},
 }
 
@@ -503,7 +534,10 @@ def aplicar_propuesta(salida, ruta):
             d["patologias"] = "COMUN" if len(p["grupos"]) == 6 else " ".join(p["grupos"])
             if d["tipo"] == "boolean, date" and p["tipo"].startswith("boolean ·"):
                 d["tipo_formulario"] = "boolean"  # sin fecha
+        if fila in FILAS_ISQ and "IAM" in d["patologias"].split() and "ISQ" not in d["patologias"].split():
+            d["patologias"] = (d["patologias"] + " ISQ").strip()
         d.update(REGLAS.get(fila, {}))
+        d["_fila"] = fila
         if fila in PUERTAS:
             cod, texto, con_fecha = PUERTAS[fila]
             t = "boolean, date" if con_fecha else "boolean"
@@ -519,8 +553,28 @@ def aplicar_propuesta(salida, ruta):
                 d.update(oculto="Sí", copiar_de=f"{cod}_date")
         d["control_en_pantalla"] = control_formulario(d)
         out.append(d)
+    # Fallecimiento como opción de "Eventos durante el seguimiento"
+    muerte = next((d for d in out if d.get("_fila") == 228), None)
+    eventos = next((d for d in out if d.get("_fila") == 231), None)
+    if muerte and eventos:
+        muerte["pertenece_a_pregunta"] = eventos["texto_ES"]
+        muerte["control_en_pantalla"] = control_formulario(muerte)
+        out.remove(muerte)
+        out.insert(out.index(eventos) + 1, muerte)
+    # Pestañas fusionadas y orden de bloques
+    pos_bloque = {b: (ti, bi) for ti, (_, bloques) in enumerate(PESTANAS) for bi, b in enumerate(bloques)}
+    nombre_tab = {b: t for t, bloques in PESTANAS for b in bloques}
+    for i, d in enumerate(out):
+        b = d["pestaña"]
+        d["_orden"] = (*pos_bloque.get(b, (99, 99)), i)
+        limpio = re.sub(r"^\d+\.\s*", "", b)
+        d["bloque"] = NOMBRE_BLOQUE.get(limpio, limpio)
+        d["pestaña"] = nombre_tab.get(b, b)
+    out.sort(key=lambda d: d["_orden"])
     for i, d in enumerate(out, 1):
         d["orden"] = i
+        d.pop("_orden", None)
+        d.pop("_fila", None)
     return out
 
 
@@ -531,8 +585,8 @@ CABECERA_BASE = [
     "valor_min", "valor_max", "valor_fijo", "exportar_al_registro",
     "columnas_en_exportacion", "comentarios_equipo",
 ]
-CABECERA = CABECERA_BASE[:-1] + ["tipo_formulario", "oculto", "valor_por_defecto", "copiar_de", "comentarios_equipo"]
-ANCHOS = [6, 26, 38, 13, 30, 45, 45, 40, 13, 22, 26, 12, 16, 34, 9, 9, 11, 11, 44, 16, 9, 22, 30, 40]
+CABECERA = CABECERA_BASE[:2] + ["bloque"] + CABECERA_BASE[2:-1] + ["tipo_formulario", "oculto", "valor_por_defecto", "copiar_de", "comentarios_equipo"]
+ANCHOS = [6, 30, 26, 38, 13, 30, 45, 45, 40, 13, 22, 26, 12, 16, 34, 9, 9, 11, 11, 44, 16, 9, 22, 30, 40]
 
 
 def estilo_cabecera(ws, ncols):

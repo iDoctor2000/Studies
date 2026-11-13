@@ -345,15 +345,28 @@ def filas_exportacion(solo_local=False, solo_validados=False):
     filas = [cab]
     copias = copias_calculadas()
     conjunto = set(cols)
+    campo = campo_por_columna()
     with db() as con:
         q = "SELECT * FROM casos" + (" WHERE estado='validado'" if solo_validados else "") + " ORDER BY numero"
         for r in con.execute(q):
-            v = json.loads(r["valores"])
+          base = json.loads(r["valores"])
+          diags = [r["principal"]] + json.loads(r["secundarias"])
+          # Una fila por diagnóstico (en la hoja local, una por caso)
+          for g in ([None] if solo_local else diags):
+            v = dict(base)
+            if g:
+                for G, cod in DIAG.items():
+                    v[cod] = 1 if G == g else 0
+                if g != "OTRO":
+                    v.pop("other_disease", None)
             if solo_local:
                 fila = [r["numero"]]
             else:
                 fila = [SITE_ID, r["numero"], r["creado"]]
             for c in cols:
+                if g and not aplica_a(campo.get(c), g):
+                    fila.append("")
+                    continue
                 x = v.get(copias.get(c, c))
                 if not solo_local and c.endswith("_date") and c[:-5] in conjunto:
                     # Fecha de un Sí/No: la fecha si la hay; 0 si está contestado; vacío si Desconocido/Duda/sin contestar
@@ -366,6 +379,30 @@ def filas_exportacion(solo_local=False, solo_validados=False):
                 fila.append("" if x is None or x in MARCAS else x)
             filas.append(fila)
     return filas
+
+
+def campo_por_columna():
+    m = {}
+    dic = diccionario()
+    for f in dic["campos"] + dic["locales"]:
+        spec = str(f.get("columnas_en_exportacion") or f["codigo_variable"])
+        if spec.startswith("("):
+            continue
+        for c in spec.split(";"):
+            if c.strip():
+                m[c.strip()] = f
+    return m
+
+
+def aplica_a(f, g):
+    """¿La columna corresponde a la fila del diagnóstico g?"""
+    if not f:
+        return True
+    grupos = re.split(r"[\s,;]+", str(f.get("patologias") or "COMUN").upper())
+    if "COMUN" not in grupos and g not in grupos:
+        return False
+    cond = str(f.get("mostrar_solo_si") or "")
+    return not any(G != g and re.search(rf"\b{cod}\b", cond) for G, cod in DIAG.items())
 
 
 def copias_calculadas():
@@ -616,7 +653,7 @@ class Manejador(BaseHTTPRequestHandler):
         if num <= 0:
             raise Error(400, "Número de caso no válido")
         if b.get("principal") not in GRUPOS_PRINCIPALES:
-            raise Error(400, "Elija la enfermedad principal")
+            raise Error(400, "Elija al menos un diagnóstico")
         sec = [s for s in b.get("secundarias", []) if s in GRUPOS_TODOS and s != b["principal"]]
         valores = {"site_id": SITE_ID, "patient_id": num, "authored_at": ahora()}
         valores.update(diagnosticos(b["principal"], sec))
@@ -773,10 +810,11 @@ class Manejador(BaseHTTPRequestHandler):
 
 
 # ---------------------------------------------------------------------------
-GRUPOS_PRINCIPALES = ["IC", "ISQ", "EAO", "MCH", "ATTR", "QTL"]
+GRUPOS_PRINCIPALES = ["ISQ", "IC", "EAO", "MCH", "QTL", "ATTR", "IAM", "HTA", "OTRO"]  # diagnósticos del estudio
 GRUPOS_TODOS = GRUPOS_PRINCIPALES
-DIAG = {"IC": "heart_failure", "ISQ": "ischemic_cardiomyopathy", "EAO": "aortic_stenosis",
-        "MCH": "hypertrophic_cardiomyopathy", "ATTR": "amyloidosis_attr", "QTL": "long_qt_syndrome"}
+DIAG = {"ISQ": "ischemic_cardiomyopathy", "IC": "heart_failure", "EAO": "aortic_stenosis",
+        "MCH": "hypertrophic_cardiomyopathy", "QTL": "long_qt_syndrome", "ATTR": "amyloidosis_attr",
+        "IAM": "myocardial_infarction", "HTA": "hypertensive_disease"}  # "OTRO" va en other_disease (texto)
 
 
 def diagnosticos(principal, sec):

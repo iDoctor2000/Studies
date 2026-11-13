@@ -6,11 +6,11 @@
 // Nada se envía a internet desde aquí: si la carpeta se sube a Office 365 lo hace OneDrive,
 // con la cuenta corporativa de cada persona.
 import { crearXlsx, leerXlsx, descargar } from "./xlsx.js";
-import { SITE_ID, MARCAS, cabeceraRegistro, valorador } from "./registro.js";
+import { SITE_ID, MARCAS, cabeceraRegistro, valorador, filasDelCaso } from "./registro.js";
 
-const PRINCIPALES = ["IC", "ISQ", "EAO", "MCH", "ATTR", "QTL"];
+const PRINCIPALES = ["ISQ", "IC", "EAO", "MCH", "QTL", "ATTR", "IAM", "HTA", "OTRO"]; // diagnósticos del estudio
 const TODOS = PRINCIPALES;
-const DIAG = { IC: "heart_failure", ISQ: "ischemic_cardiomyopathy", EAO: "aortic_stenosis", MCH: "hypertrophic_cardiomyopathy", ATTR: "amyloidosis_attr", QTL: "long_qt_syndrome" };
+const DIAG = { ISQ: "ischemic_cardiomyopathy", IC: "heart_failure", EAO: "aortic_stenosis", MCH: "hypertrophic_cardiomyopathy", QTL: "long_qt_syndrome", ATTR: "amyloidosis_attr", IAM: "myocardial_infarction", HTA: "hypertensive_disease" };
 const META = ["numero", "principal", "secundarias", "estado", "creado", "creado_por", "modificado", "modificado_por"];
 const VERSION_ARCHIVO = 1;
 
@@ -120,7 +120,7 @@ export async function apiLocal(metodo, url, b) {
   if (R === "POST casos") {
     const num = parseInt(b.numero, 10);
     if (!(num > 0)) err("Número de caso no válido");
-    if (!PRINCIPALES.includes(b.principal)) err("Elija la enfermedad principal");
+    if (!PRINCIPALES.includes(b.principal)) err("Elija al menos un diagnóstico");
     if (await uno("casos", num)) err(`El caso ${String(num).padStart(4, "0")} ya existe`);
     const sec = (b.secundarias || []).filter((s) => TODOS.includes(s) && s !== b.principal);
     const t = ahora();
@@ -214,7 +214,7 @@ export async function exportarRegistro(soloValidados = false, formato = "xlsx") 
   const val = valorador(dic, cab);
   const loc = await columnas(true);
   const casos = (await todos("casos")).filter((c) => !soloValidados || c.estado === "validado").sort((a, b) => a.numero - b.numero);
-  const reg = [cab, ...casos.map((c) => cab.map((k) => val(c, k)))];
+  const reg = [cab, ...casos.flatMap((c) => filasDelCaso(dic, c, cab).map((x) => x.fila))]; // una fila por diagnóstico
   const sello = ahora().replace(/[-:]/g, "").replace("T", "_").slice(0, 13);
   if (formato === "csv") {
     const csv = reg.map((f) => f.map((x) => { const s = String(x ?? ""); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(";")).join("\r\n");

@@ -10,6 +10,13 @@
 //  · Campos calculados (copiar_de) toman el valor de otro campo.
 
 export const SITE_ID = "HCUVA";
+
+// Diagnósticos del estudio y su variable en el registro. "OTRO" se describe en other_disease.
+export const DIAG = {
+  ISQ: "ischemic_cardiomyopathy", IC: "heart_failure", EAO: "aortic_stenosis", MCH: "hypertrophic_cardiomyopathy",
+  QTL: "long_qt_syndrome", ATTR: "amyloidosis_attr", IAM: "myocardial_infarction", HTA: "hypertensive_disease",
+};
+export const diagnosticosDelCaso = (caso) => [caso.principal, ...(caso.secundarias || [])].filter(Boolean);
 export const MARCAS = ["NC", "DUDA"];
 const FIJAS = ["site_id", "patient_id", "authored_at"];
 
@@ -58,6 +65,52 @@ export function valorador(dic, cabecera = cabeceraRegistro(dic)) {
 export function filaRegistro(dic, caso, cabecera = cabeceraRegistro(dic)) {
   const val = valorador(dic, cabecera);
   return cabecera.map((c) => val(caso, c));
+}
+
+// ---------------------------------------------------------------------------
+// UNA FILA POR DIAGNÓSTICO
+// Un paciente con varias patologías sale en el Excel como una fila por patología:
+//  · mismo patient_id (nº de caso) en todas: los ECG se enlazarán después por el CIP;
+//  · en cada fila, su diagnóstico = 1 y los demás diagnósticos del estudio = 0;
+//  · datos comunes repetidos; campos específicos solo los de esa patología.
+// ---------------------------------------------------------------------------
+const _campos = new WeakMap();
+function campoPorColumna(dic) {
+  if (_campos.has(dic)) return _campos.get(dic);
+  const m = {};
+  for (const f of [...dic.campos, ...(dic.locales || [])]) {
+    const spec = String(f.columnas_en_exportacion || f.codigo_variable);
+    if (spec.startsWith("(")) continue;
+    spec.split(";").map((c) => c.trim()).filter(Boolean).forEach((c) => (m[c] = f));
+  }
+  _campos.set(dic, m);
+  return m;
+}
+
+function aplicaA(f, g) {
+  if (!f) return true;
+  const grupos = String(f.patologias || "COMUN").toUpperCase().split(/[\s,;]+/).filter(Boolean);
+  if (!grupos.includes("COMUN") && !grupos.includes(g)) return false;
+  const cond = String(f.mostrar_solo_si || "");
+  return !Object.entries(DIAG).some(([G, c]) => G !== g && new RegExp(`\\b${c}\\b`).test(cond));
+}
+
+/** Valores del caso vistos desde un diagnóstico concreto. */
+export function valoresParaDiagnostico(caso, g) {
+  const v = { ...caso.valores };
+  for (const [G, c] of Object.entries(DIAG)) v[c] = G === g ? 1 : 0;
+  if (g !== "OTRO") delete v.other_disease;
+  return v;
+}
+
+/** [{diagnostico, fila}] — una entrada por diagnóstico del caso. */
+export function filasDelCaso(dic, caso, cabecera = cabeceraRegistro(dic)) {
+  const val = valorador(dic, cabecera);
+  const campo = campoPorColumna(dic);
+  return diagnosticosDelCaso(caso).map((g) => {
+    const vista = { ...caso, valores: valoresParaDiagnostico(caso, g) };
+    return { diagnostico: g, fila: cabecera.map((c) => (aplicaA(campo[c], g) ? val(vista, c) : "")) };
+  });
 }
 
 /** Huella de la fila: sirve para saber si un caso enviado ha cambiado después. */

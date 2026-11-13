@@ -40,6 +40,9 @@ const P = {
   MCH: '<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7a4.3 4.3 0 0 1 7.5 2.8C19.5 15.4 12 20 12 20z"/><path d="M12 9.5v8.5" stroke-width="3.2"/>',
   ATTR: '<path d="m12 3 7.8 4.5v9L12 21l-7.8-4.5v-9z"/><path d="m12 8 3.5 2v4L12 16l-3.5-2v-4z"/>',
   QTL: '<path d="M2 13h3l1.5-3 2 7 2-11 2 7h3.5c1 0 1.5-2 3-2s2 2 3 2"/>',
+  IAM: '<path d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7a4.3 4.3 0 0 1 7.5 2.8C19.5 15.4 12 20 12 20z"/><path d="m13 9-2.5 4h3L11 17"/>',
+  HTA: '<circle cx="12" cy="13" r="8"/><path d="M12 13l4-4M8 17h8M12 5V3"/>',
+  OTRO: '<circle cx="12" cy="12" r="9"/><path d="M8 12h.01M12 12h.01M16 12h.01" stroke-width="2.6"/>',
   logo: '<path d="M12 20.5s-8-4.9-8-10.9A4.6 4.6 0 0 1 12 6.6a4.6 4.6 0 0 1 8 3c0 6-8 10.9-8 10.9z"/><path d="M2.5 12.5h5l1.6-3 2.2 6 1.8-4.5 1.2 1.5h7"/>',
 };
 
@@ -48,30 +51,25 @@ export function icono(nombre, clase = "") {
 }
 
 export const ENFERMEDADES = {
-  IC: {
-    nombre: "Insuficiencia cardiaca", corto: "IC", color: "#e11d48",
-    desc: "FEVI, tipo de IC (reducida / levemente reducida / preservada), NYHA, strain y péptidos natriuréticos.",
-  },
-  ISQ: {
-    nombre: "Cardiopatía isquémica / IAM", corto: "Isquémica", color: "#ea7a0b",
-    desc: "Infarto (IAMCEST / IAMSEST, OMI / NOMI), coronariografía, TIMI, stents y revascularización.",
-  },
-  EAO: {
-    nombre: "Estenosis aórtica", corto: "EAo", color: "#2563eb",
-    desc: "Gravedad (leve / moderada / grave), Vmax, gradiente medio y área valvular.",
-  },
-  MCH: {
-    nombre: "Miocardiopatía hipertrófica", corto: "MCH", color: "#7c3aed",
-    desc: "Obstructiva o no, grosor máximo, estudio genético y antecedentes familiares.",
-  },
-  ATTR: {
-    nombre: "Amiloidosis cardiaca ATTR", corto: "ATTR", color: "#059669",
-    desc: "Subtipo (ATTRwt / ATTRv), Perugini, biopsia, genética, túnel carpiano, polineuropatía, disautonomía.",
-  },
-  QTL: {
-    nombre: "Síndrome de QT largo", corto: "QT largo", color: "#0891b2",
-    desc: "Diagnóstico, estudio genético, síncope y antecedentes arrítmicos.",
-  },
+  ISQ: { nombre: "Cardiopatía isquémica", corto: "Isquémica", color: "#ea7a0b",
+    desc: "Coronariografía, dominancia, oclusión, TIMI y revascularización." },
+  IC: { nombre: "Insuficiencia cardiaca", corto: "IC", color: "#e11d48",
+    desc: "Tipo según FEVI (reducida / levemente reducida / preservada)." },
+  EAO: { nombre: "Estenosis aórtica", corto: "EAo", color: "#2563eb",
+    desc: "Gravedad, Vmax, gradiente medio, área valvular, válvula bicúspide." },
+  MCH: { nombre: "Miocardiopatía hipertrófica", corto: "MCH", color: "#7c3aed",
+    desc: "Obstructiva o no, estudio genético, antecedentes familiares." },
+  QTL: { nombre: "Síndrome de QT largo", corto: "QT largo", color: "#0891b2",
+    desc: "Estudio genético, síncope y antecedentes arrítmicos." },
+  ATTR: { nombre: "Amiloidosis cardiaca por transtiretina", corto: "ATTR", color: "#059669",
+    desc: "Subtipo, Perugini, biopsia, genética, túnel carpiano, polineuropatía, disautonomía." },
+  IAM: { nombre: "Infarto de miocardio", corto: "IAM", color: "#b91c1c",
+    desc: "IAMCEST / IAMSEST, OMI / NOMI, coronariografía, stents, RCP y soporte circulatorio." },
+  HTA: { nombre: "Cardiopatía hipertensiva", corto: "C. hipertensiva", color: "#c026d3",
+    desc: "Fecha de diagnóstico y los datos comunes." },
+  OTRO: { nombre: "Otros", corto: "Otros", color: "#64748b",
+    desc: "Otra cardiopatía: se describe en texto libre." },
 };
 
-export const PRINCIPALES = ["IC", "ISQ", "EAO", "MCH", "ATTR", "QTL"];
+// Orden en que se ofrecen al crear un caso
+export const PRINCIPALES = ["ISQ", "IC", "EAO", "MCH", "QTL", "ATTR", "IAM", "HTA", "OTRO"];

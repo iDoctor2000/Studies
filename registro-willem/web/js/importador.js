@@ -101,7 +101,6 @@ const BOOLEANOS = [
   ["bicuspid_aortic_valve", /\b(v[aá]lvula a[oó]rtica bic[uú]spide|bicuspide|bic[uú]spide)\b/i],
   ["history_syncope", /\bs[ií]ncope\b/i],
   ["family_history_hcm", /\bantecedentes? familiar(?:es)? de (?:MCH|miocardiopat[ií]a hipertr[oó]fica)\b/i],
-  ["myocardial_infarction", /\b(IAM|infarto (?:agudo )?(?:de )?miocardio|IAMCEST|IAMSEST|SCACEST|SCASEST)\b/i],
   ["coronary_revascularization_pci", /\b(ICP|ACTP|angioplastia|stent)\b/i],
   ["coronary_revascularization_cabg", /\b(bypass|cirug[ií]a de revascularizaci[oó]n|CABG|injerto aortocoronario)\b/i],
   ["history_major_bleeding", /\b(sangrado mayor|hemorragia digestiva)\b/i],

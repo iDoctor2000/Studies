@@ -8,7 +8,7 @@
 //
 // Configuración: web/datos/envio.json (la rellena el data manager una vez) o, en un ordenador
 // concreto, desde la pantalla "Envío al registro" (se guarda en ese navegador).
-import { cabeceraRegistro, filaRegistro, huella } from "./registro.js";
+import { cabeceraRegistro, filasDelCaso, huella, DIAG } from "./registro.js";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 let _conf, _app, _libro;
@@ -150,30 +150,47 @@ export async function probarConexion(dic) {
 }
 
 /**
- * Envía (o actualiza) un caso. Devuelve {accion: "añadido"|"actualizado", huella, fecha}.
+ * Envía (o actualiza) un caso: UNA FILA POR DIAGNÓSTICO.
+ * Cada fila del Excel se reconoce por patient_id + qué diagnóstico vale 1 (o ninguno, si es "Otros").
+ * Si se quita un diagnóstico del caso, su fila se vacía (y se reutiliza más adelante).
+ * Devuelve {accion, filas, huella, fecha}.
  */
 export async function enviarCaso(dic, caso) {
   const c = await configEnvio();
   const cab = cabeceraRegistro(dic);
   const columnasExcel = await asegurarTabla(cab);
-  const fila = filaRegistro(dic, caso, cab);
-  const porNombre = Object.fromEntries(cab.map((k, i) => [k, fila[i]]));
-  const valores = columnasExcel.map((k) => paraExcel(porNombre[k] ?? ""));
+  const filas = filasDelCaso(dic, caso, cab);
   const L = await libro();
   const t = encodeURIComponent(c.tabla);
-  const col = await g("GET", `${L.base}/tables/${t}/columns/patient_id/dataBodyRange?$select=values`);
-  const ids = (col.values || []).map((r) => r[0]);
-  let i = ids.findIndex((x) => String(x) === String(caso.numero));
-  let accion = "actualizado";
-  if (i < 0) { i = ids.findIndex((x) => x === "" || x === null); accion = "añadido"; }
-  if (i >= 0) await g("PATCH", `${L.base}/tables/${t}/rows/itemAt(index=${i})`, { values: [valores] });
-  else await g("POST", `${L.base}/tables/${t}/rows`, { values: [valores] });
-  return { accion, huella: huella(fila), fecha: new Date().toISOString() };
+  const columna = async (nombre) => (await g("GET", `${L.base}/tables/${t}/columns/${encodeURIComponent(nombre)}/dataBodyRange?$select=values`)).values.map((r) => r[0]);
+  const ids = await columna("patient_id");
+  const flags = {};
+  for (const [G, cod] of Object.entries(DIAG)) flags[G] = await columna(cod);
+  const esDe = (i, G) => (G === "OTRO" ? Object.values(flags).every((col) => String(col[i]) !== "1") : String(flags[G][i]) === "1");
+  const usadas = new Set();
+  let añadidas = 0, actualizadas = 0;
+  for (const { diagnostico, fila } of filas) {
+    const porNombre = Object.fromEntries(cab.map((k, i) => [k, fila[i]]));
+    const valores = columnasExcel.map((k) => paraExcel(porNombre[k] ?? ""));
+    let i = ids.findIndex((x, j) => !usadas.has(j) && String(x) === String(caso.numero) && esDe(j, diagnostico));
+    if (i >= 0) actualizadas++;
+    else { i = ids.findIndex((x, j) => !usadas.has(j) && (x === "" || x === null)); añadidas++; }
+    if (i >= 0) { await g("PATCH", `${L.base}/tables/${t}/rows/itemAt(index=${i})`, { values: [valores] }); usadas.add(i); ids[i] = caso.numero; }
+    else { await g("POST", `${L.base}/tables/${t}/rows`, { values: [valores] }); ids.push(caso.numero); usadas.add(ids.length - 1); }
+  }
+  // Filas antiguas de este caso (diagnóstico retirado): se vacían
+  for (let i = 0; i < ids.length; i++) {
+    if (!usadas.has(i) && String(ids[i]) === String(caso.numero)) {
+      await g("PATCH", `${L.base}/tables/${t}/rows/itemAt(index=${i})`, { values: [columnasExcel.map(() => "")] });
+    }
+  }
+  const accion = añadidas && !actualizadas ? "añadido" : "actualizado";
+  return { accion, filas: filas.length, huella: huella(filas.map((x) => x.fila)), fecha: new Date().toISOString() };
 }
 
 /** ¿El caso tiene cambios que no se han enviado? */
 export function pendienteDeEnvio(dic, caso) {
   const v = caso.valores;
   if (!v.registro_enviado) return "nunca";
-  return huella(filaRegistro(dic, caso)) === v.registro_huella ? "" : "cambios";
+  return huella(filasDelCaso(dic, caso).map((x) => x.fila)) === v.registro_huella ? "" : "cambios";
 }

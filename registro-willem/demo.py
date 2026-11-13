@@ -74,7 +74,7 @@ def _valores(rnd, principal, hoy):
         n = rnd.choice(["nyha_class_ii", "nyha_class_ii", "nyha_class_iii", "nyha_class_i"])
         for k in ["nyha_class_i", "nyha_class_ii", "nyha_class_iii", "nyha_class_iv"]:
             v[k] = 1 if k == n else 0
-    elif principal == "ISQ":
+    elif principal in ("ISQ", "IAM"):
         v["echocardiography_lvef"] = rnd.randint(35, 62)
         v["ischemic_cardiomyopathy_diagnosis_date"] = _f(fecha_dx)
         v["myocardial_infarction"] = 1
@@ -144,18 +144,30 @@ def poblar(ruta_db, ruta_llave, hash_pw, diagnosticos):
         for u, n, r, c in USUARIOS:
             con.execute("INSERT INTO usuarios(usuario,nombre,rol,hash,creado) VALUES(?,?,?,?,?)",
                         (u, n, r, hash_pw(c), dt.datetime.now().isoformat(timespec="seconds")))
-        plan = ["IC"] * 9 + ["ISQ"] * 8 + ["EAO"] * 4 + ["MCH"] * 3 + ["ATTR"] * 3 + ["QTL"] * 2
+        plan = ["IC"] * 9 + ["IAM"] * 6 + ["ISQ"] * 2 + ["EAO"] * 4 + ["MCH"] * 3 + ["ATTR"] * 3 + ["QTL"] * 2 + ["HTA", "OTRO"]
         rnd.shuffle(plan)
         llave = sqlite3.connect(ruta_llave)
         llave.execute("""CREATE TABLE IF NOT EXISTS llave(numero INTEGER PRIMARY KEY, cip TEXT, carm TEXT, nhc TEXT,
                          notas TEXT, creado TEXT, creado_por TEXT)""")
         for i, principal in enumerate(plan, 1):
             sec = []
-            if rnd.random() < 0.3:
-                sec = [rnd.choice([g for g in ["IC", "ISQ", "EAO", "ATTR"] if g != principal])]
+            if principal == "IAM" and rnd.random() < 0.5:
+                sec = ["ISQ"]
+            elif rnd.random() < 0.3:
+                sec = [rnd.choice([g for g in ["IC", "EAO", "ATTR", "HTA"] if g != principal])]
             v = {"site_id": "HCUVA", "patient_id": i}
             v.update(diagnosticos(principal, sec))
             v.update(_valores(rnd, principal, hoy))
+            if principal == "OTRO":
+                v["other_disease"] = "Miocardiopatía dilatada no isquémica"
+            # Seguimiento: eventos con su fecha
+            v["follow_up_date"] = (hoy - dt.timedelta(days=rnd.randint(5, 60))).isoformat()
+            eventos = ["death", "mace_myocardial_infarction", "mace_cardiac_arrest_sudden_death", "mace_heart_failure", "mace_revascularization", "mace_stroke_tia"]
+            for e in eventos:
+                si = rnd.random() < 0.12
+                v[e] = 1 if si else 0
+                if si:
+                    v[e + "_date"] = (hoy - dt.timedelta(days=rnd.randint(10, 300))).isoformat()
             # Algunas respuestas "Desconocido" y "Duda"
             if rnd.random() < 0.4:
                 v["family_history_heart_disease"] = "NC"
