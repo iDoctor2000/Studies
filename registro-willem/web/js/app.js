@@ -185,14 +185,33 @@ function aplicarTema() {
 // ===========================================================================
 //  Login / configuración inicial
 // ===========================================================================
-// Electrocardiograma en bucle: un latido (onda P, QRS y onda T) cada 380 unidades, repetido.
-// La línea se desplaza un latido por ciclo y vuelve a empezar sin que se note el salto.
-const LATIDO = 380;
-const ECG_PATH = "M0 80 " + Array.from({ length: 6 }, (_, k) => {
+// Electrocardiograma tipo monitor: 4 latidos (onda P, QRS, onda T) a lo ancho de la pantalla.
+// Un punto luminoso dibuja la traza de izquierda a derecha y va borrando por delante el trazo
+// anterior; al llegar al final vuelve a empezar por la izquierda.
+const LATIDO = 350;
+const ECG_PATH = "M0 80 " + Array.from({ length: 4 }, (_, k) => {
   const x = k * LATIDO;
   return `H${x} l12 -6 l10 6 H${x + 80} l8 10 l12 -70 l14 96 l10 -36 H${x + 200} q18 -22 36 0 H${x + LATIDO}`;
 }).join(" ");
-const ecgSvg = (clase) => `<svg class="${clase}" viewBox="0 0 1400 160" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><path class="ecg-mov" d="${ECG_PATH}"/></svg>`;
+const ecgSvg = (clase) => `<svg class="${clase}" viewBox="0 0 1400 160" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+  <path class="ecg-barrido" d="${ECG_PATH}"/><circle class="ecg-punta" r="4.5" cx="-20" cy="80"/></svg>`;
+
+const ECG_CICLO = 6500;  // ms por barrido: 4 latidos, trazado lento y sereno
+const ECG_HUECO = 90;    // trozo borrado por delante del punto
+function animarECG(t) {
+  for (const p of document.querySelectorAll(".ecg-barrido")) {
+    const L = +(p.dataset.l ||= p.getTotalLength());
+    const punta = p.nextElementSibling;
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) { p.style.strokeDasharray = "none"; punta.style.display = "none"; continue; }
+    const h = ((t % ECG_CICLO) / ECG_CICLO) * L;           // distancia recorrida por el punto
+    p.style.strokeDasharray = `${L - ECG_HUECO} ${ECG_HUECO}`;
+    p.style.strokeDashoffset = `${L - ECG_HUECO - h}`; // hueco justo por delante del punto
+    const q = p.getPointAtLength(h);
+    punta.setAttribute("cx", q.x); punta.setAttribute("cy", q.y);
+  }
+  requestAnimationFrame(animarECG);
+}
+requestAnimationFrame(animarECG);
 
 function heroe() {
   return `<div class="heroe">

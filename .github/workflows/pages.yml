@@ -24,6 +24,14 @@ jobs:
       url: ${{ steps.despliegue.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      # Marca cada archivo con la versión publicada para que los navegadores no usen copias antiguas
+      - name: Versionar archivos
+        run: |
+          V="${GITHUB_SHA::8}"
+          cd registro-willem/web
+          sed -i -E "s#(from \"\./[a-z]+\.js)\"#\1?v=$V\"#g" js/*.js
+          sed -i -E "s#(src=\"js/app\.js)\"#\1?v=$V\"#; s#(href=\"css/app\.css)\"#\1?v=$V\"#; s#(src=\"vendor/msal-browser\.min\.js)\"#\1?v=$V\"#" index.html
+          grep -c "?v=$V" index.html js/app.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
