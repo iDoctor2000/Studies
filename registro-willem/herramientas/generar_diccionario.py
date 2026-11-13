@@ -418,8 +418,6 @@ def main(src, dst):
 SERGIO = None  # ruta al Excel "WILLEM_propuesta_agrupacion_por_diagnostico"
 COL_GRUPO = {"HF": "IC", "ATTR": "ATTR", "AS": "EAO", "HCM": "MCH", "MI": "IAM", "Long QT": "QTL"}
 
-# Cardiopatía isquémica (sin infarto) comparte con el infarto la parte coronaria
-FILAS_ISQ = {86, 96, 97, 98} | set(range(116, 132))
 
 # Pestañas del formulario (nov-2026): fusión de bloques. (pestaña, [bloques de Sergio en orden])
 PESTANAS = [
@@ -470,6 +468,12 @@ REGLAS = {
     200: {"mostrar_solo_si": "implanted_cardiovascular_devices = 1"},
     201: {"mostrar_solo_si": "implanted_cardiovascular_devices = 1"},
     223: {"oculto": "Sí", "copiar_de": "chronic_kidney_disease", "ayuda_ES": "Se copia de Enfermedad renal crónica."},
+    # Isquémica e infarto: mismos campos, sin depender de "infarto = Sí"
+    44: {"patologias": "ISQ IAM", "mostrar_solo_si": ""},
+    56: {"patologias": "ISQ IAM", "mostrar_solo_si": ""},
+    57: {"mostrar_solo_si": ""}, 58: {"mostrar_solo_si": ""}, 59: {"mostrar_solo_si": ""},
+    60: {"mostrar_solo_si": ""}, 61: {"mostrar_solo_si": ""}, 62: {"mostrar_solo_si": ""},
+    86: {"mostrar_solo_si": ""}, 87: {"mostrar_solo_si": ""}, 88: {"mostrar_solo_si": ""},
     # Los diagnósticos solo se preguntan al principio: los duplicados se copian
     81: {"oculto": "Sí", "ayuda_ES": "Se rellena al elegir 'Otros' en los diagnósticos del caso."},
     173: {"oculto": "Sí", "copiar_de": "long_qt_syndrome", "ayuda_ES": "Se copia del diagnóstico inicial."},
@@ -534,7 +538,8 @@ def aplicar_propuesta(salida, ruta):
             d["patologias"] = "COMUN" if len(p["grupos"]) == 6 else " ".join(p["grupos"])
             if d["tipo"] == "boolean, date" and p["tipo"].startswith("boolean ·"):
                 d["tipo_formulario"] = "boolean"  # sin fecha
-        if fila in FILAS_ISQ and "IAM" in d["patologias"].split() and "ISQ" not in d["patologias"].split():
+        # Cardiopatía isquémica e infarto ven exactamente los mismos campos
+        if "IAM" in d["patologias"].split() and "ISQ" not in d["patologias"].split():
             d["patologias"] = (d["patologias"] + " ISQ").strip()
         d.update(REGLAS.get(fila, {}))
         d["_fila"] = fila
