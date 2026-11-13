@@ -1,7 +1,12 @@
 # Nunca subir datos reales
 *.db
 *.sqlite
-llave*
+llave*.sqlite
+llave*.xlsx
+LLAVE_*
+*.pdf
+WILLEM_privado/
+WILLEM_anonimizado/
 datos_reales/
 __pycache__/
 registro-willem/datos/

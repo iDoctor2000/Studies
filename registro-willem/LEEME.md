@@ -82,6 +82,7 @@ demo.py            pacientes ficticios para la demostración
 web/               interfaz (HTML, CSS, JavaScript; sin dependencias de internet)
 diccionario/       diccionario maestro (Excel)
 herramientas/      generador del diccionario a partir del CRF original
+extractor/         lectura y anonimización de informes de alta en PDF (Mac, sin internet)
 docs/              arquitectura
 ```
 
@@ -94,3 +95,40 @@ iniciar.bat --datos \\NAS\willem\datos
 El programa detecta que es una carpeta de red y usa un modo de SQLite seguro para ella.
 **Importante:** el servidor debe estar abierto en **un solo ordenador a la vez**; los demás
 entran con el navegador (`iniciar_red.bat`). El libro llave NO debe ir en la misma carpeta.
+
+## Informes de alta en PDF → casos anonimizados (Mac, fase 1)
+
+Doble clic en **`procesar_informes.command`**, elija la carpeta o el USB con los PDF y espere.
+Al terminar se abre un resumen en el navegador. No necesita internet ni instalar nada
+(el lector de PDF va incluido en `extractor/vendor`).
+
+Para cada informe:
+
+1. Lee la **cabecera** por reglas fijas (NHC, CIP SNS, **CIP autonómico CARM**, nombre, fechas…).
+2. Busca al paciente en el **libro llave** por su CARM: si ya estaba (reingreso), usa su número de
+   caso; si no, le da el siguiente. La primera vez puede fijar el primer número:
+   `python3 extractor/procesar_informes.py --primer-numero 101`, o importar la llave que ya
+   tenga la web: `--importar-llave LLAVE_WILLEM_NO_COMPARTIR_….xlsx`.
+3. Quita cabecera, firma, pie y código lateral, y **sustituye** en el texto clínico nombres,
+   teléfonos, DNI, CIP, NHC, domicilio, localidad y profesionales por `[PACIENTE]`, `[TELÉFONO]`…
+   Las fechas y los datos clínicos se conservan.
+4. **Doble control**: vuelve a buscar cada identificador en el resultado (sin tildes, sin espacios
+   ni puntos). Si queda alguno, el informe se **bloquea**.
+
+| Resultado | Dónde queda |
+|---|---|
+| **Listo** | `~/WILLEM_anonimizado/listos/caso_0007_ingreso_2025-05-18.json` (+ `.txt`) — se puede compartir |
+| **Revisar** (posibles nombres, p. ej. "(Arce /Gañan)") | `~/WILLEM_privado/pendientes_de_revisar/` — privado |
+| **Bloqueado** (sin CARM, escaneado, dos pacientes en un PDF, fallo del control) | no se guarda nada |
+
+Para resolver un aviso: si es un nombre, añádalo a `~/WILLEM_privado/ocultar_tambien.txt`; si no
+lo es, a `no_son_nombres.txt`. Vuelva a procesar la carpeta (es seguro repetir: mismo paciente,
+mismo caso).
+
+En `~/WILLEM_privado/` (NUNCA al NAS ni a la nube): `llave_willem.sqlite` (libro llave, mismo
+formato que `servidor.py --llave`; además guarda qué PDF se procesó y un directorio de
+profesionales que se ocultan en los informes siguientes), las listas y los resúmenes.
+Requisitos: FileVault activado (el programa avisa si no lo está) y no mover esa carpeta a
+Escritorio/Documentos si iCloud los sincroniza.
+
+Pruebas con informes inventados: `python3 extractor/pruebas/probar_extractor.py`.

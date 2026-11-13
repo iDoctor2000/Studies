@@ -566,7 +566,7 @@ async function pCaso(num, tabId) {
   E.caso = await api("GET", "casos/" + num);
   E.pend = {}; E.origen = null;
   const tabs = pestanasDelCaso(S.modelo, E.caso);
-  E.tab = tabs.find((t) => t.id === tabId) ? tabId : tabs[0].id; // siempre empieza por "Datos del paciente"
+  E.tab = tabs.find((t) => t.id === tabId) ? tabId : tabs[0].id; // siempre empieza por la primera pestaña ("Diagnósticos")
   barra(`Caso #${pad(num)}`, `<a href="#/casos">Casos</a> › ${esc(diagnosticosDe(E.caso).map((g) => ENFERMEDADES[g]?.corto || g).join(" · "))}`,
     `<button class="btn" id="bImp">${icono("importar")} Importar informe</button><button class="btn fantasma" id="bHist">${icono("historial")} Historial</button>`);
   $("#bImp").onclick = abrirImportador;

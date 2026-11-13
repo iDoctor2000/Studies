@@ -421,8 +421,9 @@ COL_GRUPO = {"HF": "IC", "ATTR": "ATTR", "AS": "EAO", "HCM": "MCH", "MI": "IAM",
 
 # Pestañas del formulario (nov-2026): fusión de bloques. (pestaña, [bloques de Sergio en orden])
 PESTANAS = [
-    ("1. Datos del paciente", ["01. Metadatos", "02. Demografía y hábitos", "15. Constantes", "15. Clase funcional NYHA", "02. Hábitos"]),
-    ("2. Diagnósticos", ["03. Diagnóstico y clasificación", "04. ATTR: marcadores", "05. MI: gravedad y tratamiento"]),
+    # 4ª ronda de Sergio: primero Diagnósticos, después Datos del paciente
+    ("1. Diagnósticos", ["03. Diagnóstico y clasificación", "04. ATTR: marcadores", "05. MI: gravedad y tratamiento"]),
+    ("2. Datos del paciente", ["01. Metadatos", "02. Demografía y hábitos", "15. Constantes", "15. Clase funcional NYHA", "02. Hábitos"]),
     ("3. Antecedentes y comorbilidades", ["16. Factores de riesgo cardiovascular", "17. Historia cardiovascular", "19. Comorbilidades"]),
     ("4. Procedimientos diagnósticos y dispositivos", ["14. Analítica y ECG", "06. Conducción y ECG", "08. Ecocardiograma general",
                                                        "09. Eco estenosis aórtica", "11. Coronariografía / MI", "05. MI: revascularización",
@@ -522,6 +523,12 @@ REGLAS2 = {
     52: {"oculto": "Sí", "calcular": f"{FEVI} > 40 y {FEVI} < 50 -> 1 ; {FEVI} > 0 -> 0", "ayuda_ES": "Se calcula: FEVI 41–49 %."},
     53: {"oculto": "Sí", "calcular": f"{FEVI} >= 50 -> 1 ; {FEVI} > 0 -> 0", "ayuda_ES": "Se calcula: FEVI ≥ 50 %."},
     54: {"oculto": "Sí", "ayuda_ES": "No se recogen otros tipos de IC: siempre en blanco."},
+    # 4ª ronda de Sergio: parámetros de eco según diagnóstico
+    #  - DTDVI, septo y pared posterior (PLAX) y strain: no en isquémica, infarto, QT largo ni IC
+    #  - grosor máximo de pared: solo miocardiopatía hipertrófica
+    102: {"patologias": "EAO MCH ATTR HTA OTRO"}, 103: {"patologias": "EAO MCH ATTR HTA OTRO"},
+    104: {"patologias": "EAO MCH ATTR HTA OTRO"}, 106: {"patologias": "EAO MCH ATTR HTA OTRO"},
+    105: {"patologias": "MCH"},
     # Fecha de la valoración basal = fecha de diagnóstico de la patología de cada fila
     149: {"oculto": "Sí", "ayuda_ES": "Se calcula: fecha de diagnóstico de la patología de la fila.",
           "calcular": " ; ".join(f"{d} = 1 -> {d}_diagnosis_date" for d in (
