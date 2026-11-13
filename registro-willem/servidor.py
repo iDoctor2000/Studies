@@ -344,6 +344,7 @@ def filas_exportacion(solo_local=False, solo_validados=False):
         cab = ["patient_id"] + cols
     filas = [cab]
     copias = copias_calculadas()
+    conjunto = set(cols)
     with db() as con:
         q = "SELECT * FROM casos" + (" WHERE estado='validado'" if solo_validados else "") + " ORDER BY numero"
         for r in con.execute(q):
@@ -354,6 +355,14 @@ def filas_exportacion(solo_local=False, solo_validados=False):
                 fila = [SITE_ID, r["numero"], r["creado"]]
             for c in cols:
                 x = v.get(copias.get(c, c))
+                if not solo_local and c.endswith("_date") and c[:-5] in conjunto:
+                    # Fecha de un Sí/No: la fecha si la hay; 0 si está contestado; vacío si Desconocido/Duda/sin contestar
+                    if x not in (None, "") and x not in MARCAS:
+                        fila.append(x)
+                    else:
+                        b = v.get(copias.get(c[:-5], c[:-5]))
+                        fila.append(0 if b in (0, 1) else "")
+                    continue
                 fila.append("" if x is None or x in MARCAS else x)
             filas.append(fila)
     return filas

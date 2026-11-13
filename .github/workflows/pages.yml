@@ -1,0 +1,32 @@
+# Publica la aplicación (solo el programa, nunca datos de pacientes) en GitHub Pages
+name: Publicar WILLEM en GitHub Pages
+
+on:
+  push:
+    branches: [claude/sweet-cori-ujyrvx, main]
+    paths: ["registro-willem/web/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publicar:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.despliegue.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: registro-willem/web
+      - id: despliegue
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,8 @@
+{
+  "_ayuda": "Configuración del envío al Excel corporativo. clientId = Id. de aplicación (cliente) y tenantId = Id. de directorio (inquilino) de la aplicación registrada por Informática en Microsoft Entra ID. excelUrl = enlace del Excel en SharePoint/OneDrive del SMS. No son contraseñas.",
+  "clientId": "",
+  "tenantId": "",
+  "excelUrl": "",
+  "tabla": "WILLEM",
+  "scopes": ["Files.ReadWrite.All"]
+}

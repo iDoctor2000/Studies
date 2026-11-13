@@ -6,9 +6,8 @@
 // Nada se envía a internet desde aquí: si la carpeta se sube a Office 365 lo hace OneDrive,
 // con la cuenta corporativa de cada persona.
 import { crearXlsx, leerXlsx, descargar } from "./xlsx.js";
+import { SITE_ID, MARCAS, cabeceraRegistro, valorador } from "./registro.js";
 
-const SITE_ID = "HCUVA";
-const MARCAS = ["NC", "DUDA"]; // Desconocido / Duda: en el Excel final van vacíos
 const PRINCIPALES = ["IC", "ISQ", "EAO", "MCH", "ATTR", "QTL"];
 const TODOS = PRINCIPALES;
 const DIAG = { IC: "heart_failure", ISQ: "ischemic_cardiomyopathy", EAO: "aortic_stenosis", MCH: "hypertrophic_cardiomyopathy", ATTR: "amyloidosis_attr", QTL: "long_qt_syndrome" };
@@ -210,13 +209,12 @@ export async function apiLocal(metodo, url, b) {
 // Exportación final (data manager)
 // ---------------------------------------------------------------------------
 export async function exportarRegistro(soloValidados = false, formato = "xlsx") {
-  const cols = (await columnas(false)).filter((c) => !["site_id", "patient_id", "authored_at"].includes(c));
+  const dic = await diccionario();
+  const cab = cabeceraRegistro(dic);
+  const val = valorador(dic, cab);
   const loc = await columnas(true);
   const casos = (await todos("casos")).filter((c) => !soloValidados || c.estado === "validado").sort((a, b) => a.numero - b.numero);
-  const dic = await diccionario();
-  const copias = Object.fromEntries(dic.campos.filter((d) => String(d.copiar_de || "").trim()).map((d) => [d.codigo_variable, String(d.copiar_de).trim()]));
-  const val = (c, k) => { const x = c.valores[copias[k] || k]; return x == null || MARCAS.includes(x) ? "" : x; };
-  const reg = [["site_id", "patient_id", "authored_at", ...cols], ...casos.map((c) => [SITE_ID, c.numero, c.creado, ...cols.map((k) => val(c, k))])];
+  const reg = [cab, ...casos.map((c) => cab.map((k) => val(c, k)))];
   const sello = ahora().replace(/[-:]/g, "").replace("T", "_").slice(0, 13);
   if (formato === "csv") {
     const csv = reg.map((f) => f.map((x) => { const s = String(x ?? ""); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(";")).join("\r\n");

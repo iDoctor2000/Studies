@@ -23,7 +23,7 @@ import servidor  # noqa: E402
 import demo  # noqa: E402
 
 WEB = os.path.join(RAIZ, "web")
-MODULOS = ["xlsx", "iconos", "modelo", "importador", "local", "app"]  # orden de dependencias
+MODULOS = ["xlsx", "registro", "iconos", "modelo", "importador", "local", "envio", "app"]  # orden de dependencias
 
 
 def diccionario_json():
@@ -96,6 +96,8 @@ def html_unico(dic, dem):
     if "</script" in codigo.lower():
         raise SystemExit("El código contiene '</script': no se puede incrustar")
     html = html.replace('<link rel="stylesheet" href="css/app.css">', f"<style>\n{css}\n</style>")
+    # El archivo único se abre con doble clic: ahí no hay inicio de sesión de Microsoft (envío solo desde la web)
+    html = html.replace('  <script src="vendor/msal-browser.min.js"></script>\n', "")
     html = html.replace('<script type="module" src="js/app.js"></script>',
                         f"<script>\n{datos}</script>\n<script>\n\"use strict\";\n{codigo}\n</script>")
     os.makedirs(os.path.join(RAIZ, "dist"), exist_ok=True)

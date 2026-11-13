@@ -4,6 +4,7 @@ import { construirModelo, pestanasDelCaso, progresoPestana, progresoCaso, progre
   NC, DUDA, esMarca, marcaDe, admiteMarcas, dudasDelCaso, valoresPorDefecto } from "./modelo.js";
 import { anonimizar, extraer, EJEMPLO } from "./importador.js";
 import * as L from "./local.js";
+import * as ENV from "./envio.js";
 
 // ===========================================================================
 //  Utilidades
@@ -120,6 +121,7 @@ async function arrancar() {
 
 async function entrar() {
   const dic = await api("GET", "diccionario");
+  S.dic = dic;
   S.modelo = construirModelo(dic);
   if (localStorage.getItem("willem_codigos") === null) localStorage.setItem("willem_codigos", esDM() ? "1" : "0");
   document.body.classList.toggle("sin-codigos", localStorage.getItem("willem_codigos") !== "1");
@@ -147,6 +149,7 @@ async function enrutar() {
     else if (pag === "usuarios" && esDM()) await pUsuarios();
     else if (pag === "diccionario") await pDiccionario();
     else if (pag === "dudas") await pDudas();
+    else if (pag === "envio" && esDM()) await pEnvio();
     else if (pag === "carpeta" && navegador()) await pCarpeta();
     else if (pag === "unir" && navegador() && esDM()) await pUnir();
     else location.hash = "#/panel";
@@ -267,6 +270,7 @@ function pintarEstructura() {
         ${dm ? `<div class="titulo">Data manager</div>
         <a href="#/llave" data-pag="llave">${icono("llave")} Libro llave</a>
         ${navegador() ? `<a href="#/unir" data-pag="unir">${icono("unir")} Unir casos</a>` : ""}
+        <a href="#/envio" data-pag="envio">${icono("enviar")} Envío al registro</a>
         <a href="#/exportar" data-pag="exportar">${icono("exportar")} Exportar</a>
         ${navegador() ? "" : `<a href="#/usuarios" data-pag="usuarios">${icono("usuarios")} Usuarios</a>`}` : ""}
         ${navegador() ? `<div class="titulo">Guardado</div><a href="#/carpeta" data-pag="carpeta">${icono("nube")} Carpeta compartida</a>` : ""}
@@ -413,13 +417,14 @@ async function pCasos(qs) {
         ${[["", "Todos los estados"], ["borrador", "Borrador"], ["completo", "Completo"], ["validado", "Validado"]].map(([k, t]) => `<span class="chip ${F.estado === k ? "on" : ""}" data-estado="${k}">${t}</span>`).join("")}
       </div>
       <div class="tarjeta">
-        ${lista.length ? `<table class="tabla"><thead><tr><th>Caso</th><th>Enfermedad principal</th><th>Otros diagnósticos</th><th>Completitud</th><th>Estado</th><th>Última modificación</th></tr></thead><tbody>
+        ${lista.length ? `<table class="tabla"><thead><tr><th>Caso</th><th>Enfermedad principal</th><th>Otros diagnósticos</th><th>Completitud</th><th>Estado</th><th>Registro</th><th>Última modificación</th></tr></thead><tbody>
         ${lista.map((c) => `<tr data-n="${c.numero}" style="--c:${ENFERMEDADES[c.principal]?.color}">
           <td><span class="num-caso"><small>#</small>${pad(c.numero)}</span></td>
           <td>${pillEnf(c.principal)}</td>
           <td>${c.secundarias.map((s) => pillEnf(s, true)).join(" ") || `<span class="sub">—</span>`}</td>
           <td><div style="display:flex;align-items:center;gap:10px">${anillo(c.progreso.pct, 40, 4.5)}<span class="sub">${c.progreso.ok}/${c.progreso.tot}</span></div></td>
           <td>${estadoPill(c.estado)} ${c.dudas.length ? `<span class="pill sec" style="--c:#d97706" title="Dudas sin resolver">${icono("bandera")} ${c.dudas.length}</span>` : ""}</td>
+          <td>${pillEnvio(c)}</td>
           <td class="quien">${relativo(c.modificado)}<small>por ${esc(c.modificado_por)}</small></td></tr>`).join("")}
         </tbody></table>` : `<div class="vacio">${icono("casos")}<p>No hay casos con estos filtros.</p><a class="btn primario" href="#/nuevo">${icono("mas")} Crear un caso</a></div>`}
       </div>`;
@@ -539,6 +544,7 @@ function pintarCaso(animar = false) {
           ${soloLectura() ? "" : `<button class="btn pequeno" id="bDiag">${icono("editar")} Diagnósticos</button>`}</div></div>
       <div class="der">
         <span class="guardado" id="guardado">${icono("check")} Guardado</span>
+        ${botonEnvio(c)}
         <select id="selEstado" ${soloLectura() ? "disabled" : ""}>
           <option value="borrador" ${c.estado === "borrador" ? "selected" : ""}>Borrador</option>
           <option value="completo" ${c.estado === "completo" ? "selected" : ""}>Completo</option>
@@ -591,6 +597,7 @@ function pintarCaso(animar = false) {
   if (foco) $(`[data-foco="${CSS.escape(foco)}"]`)?.focus();
 
   $("#bDiag")?.addEventListener("click", editarDiagnosticos);
+  $("#bEnviar")?.addEventListener("click", () => enviarAlRegistro(E.caso));
   $("#selEstado").onchange = async (ev) => {
     await vaciarPendientes();
     if (ev.target.value === "validado" && dudasDelCaso(S.modelo, c).length) {
@@ -1093,6 +1100,116 @@ async function pDiccionario() {
     $$("[data-gg]", cont).forEach((x) => (x.onclick = () => { g = x.dataset.gg; pintar(); }));
   };
   pintar();
+}
+
+// ===========================================================================
+//  ENVÍO AL REGISTRO (Excel corporativo, Office 365 de la CARM)
+// ===========================================================================
+function pillEnvio(c) {
+  const p = ENV.pendienteDeEnvio(S.dic, c);
+  if (p === "nunca") return `<span class="sub">—</span>`;
+  if (p === "cambios") return `<span class="pill sec" style="--c:#d97706" title="Se ha modificado después de enviarlo">${icono("enviar")} Cambios sin enviar</span>`;
+  return `<span class="pill sec" style="--c:#16a34a" title="Enviado ${esc(fmtFecha(c.valores.registro_enviado))}">${icono("check")} Enviado</span>`;
+}
+
+function botonEnvio(c) {
+  const p = ENV.pendienteDeEnvio(S.dic, c);
+  const txt = p === "nunca" ? "Enviar al registro" : p === "cambios" ? "Reenviar cambios" : "Enviado";
+  const tit = p === "" ? `Enviado ${relativo(c.valores.registro_enviado)} por ${c.valores.registro_enviado_por || ""}. Pulse para volver a enviar.` : "Escribe este caso en el Excel corporativo del registro";
+  return `<button class="btn btn-envio ${p === "" ? "enviado" : p === "cambios" ? "cambios" : ""}" id="bEnviar" title="${esc(tit)}">${icono(p === "" ? "check" : "enviar")} ${txt}</button>`;
+}
+
+async function enviarAlRegistro(caso, { silencioso = false } = {}) {
+  await vaciarPendientes();
+  const est = await ENV.estadoEnvio();
+  if (!est.ok) {
+    if (silencioso) throw new Error(est.motivo);
+    return modal({ titulo: "No se puede enviar todavía", cancelar: null, aceptar: "Entendido",
+      html: `<p>${esc(est.motivo)}</p>${est.sinConfig ? `<p class="sub">${esDM() ? `Configúrelo en <a href="#/envio">Envío al registro</a>.` : "Avise a un data manager."}</p>` : ""}
+        <p class="sub">Mientras tanto el caso está a salvo: se guarda en este ordenador y en la carpeta compartida.</p>` });
+  }
+  const dudas = dudasDelCaso(S.modelo, caso);
+  if (dudas.length) {
+    if (silencioso) throw new Error("tiene dudas sin resolver");
+    return toast(`No se puede enviar: hay ${dudas.length} duda${dudas.length > 1 ? "s" : ""} sin resolver`, "mal");
+  }
+  const prog = progresoCaso(S.modelo, caso);
+  if (!silencioso && prog.pct < 100) {
+    const ok = await modal({ titulo: "El caso no está completo", aceptar: "Enviar igualmente",
+      html: `<p>Faltan <b>${prog.tot - prog.ok}</b> preguntas por contestar (${prog.pct}% completado). Las que falten irán en blanco.</p><p class="sub">Podrá volver a enviarlo cuando lo complete: se actualizará la misma fila.</p>` });
+    if (!ok) return;
+  }
+  const b = $("#bEnviar");
+  if (b) { b.disabled = true; b.innerHTML = `${icono("historial")} Enviando…`; }
+  try {
+    const r = await ENV.enviarCaso(S.dic, caso);
+    const act = await api("PUT", "casos/" + caso.numero, { valores: { registro_enviado: r.fecha, registro_huella: r.huella, registro_enviado_por: S.yo.usuario } });
+    if (E.caso?.numero === caso.numero) { E.caso = act; pintarCaso(); }
+    if (!silencioso) toast(`Caso #${pad(caso.numero)} ${r.accion === "añadido" ? "enviado" : "actualizado"} en el registro`);
+    return r;
+  } catch (e) {
+    if (silencioso) throw e;
+    toast("No se ha podido enviar: " + e.message, "mal");
+    if (E.caso?.numero === caso.numero) pintarCaso();
+  }
+}
+
+async function pEnvio() {
+  barra("Envío al registro", "Data manager");
+  const pintar = async (resultado) => {
+    const est = await ENV.estadoEnvio();
+    const c = est.conf || {};
+    await cargarCasos();
+    const listos = S.casos.filter((x) => x.estado !== "borrador" && !x.dudas.length && ENV.pendienteDeEnvio(S.dic, x));
+    const cuenta = await ENV.cuentaActual();
+    $("#contenido").innerHTML = `
+      <div class="aviso-local">${icono("candado")}<div><b>Cómo funciona.</b> Cada persona inicia sesión con <b>su cuenta del SMS</b> y la aplicación escribe la fila del caso en el Excel corporativo, con el formato final del registro.
+        Los datos van del navegador directamente al Office 365 de la CARM. La aplicación nunca ve contraseñas.</div></div>
+      <div class="grid g2" style="grid-template-columns:1.1fr 1fr;align-items:start">
+        <div class="tarjeta pad">
+          <h3>Estado</h3>
+          <div class="sub" style="margin:6px 0 14px">${est.ok ? `${icono("check")} Listo para enviar${cuenta ? ` · sesión: <b>${esc(cuenta.username)}</b>` : ""}` : esc(est.motivo)}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn primario" id="eProbar" ${est.ok ? "" : "disabled"}>${icono("nube")} Probar conexión</button>
+            <button class="btn" id="eTodos" ${est.ok && listos.length ? "" : "disabled"}>${icono("enviar")} Enviar pendientes (${listos.length})</button>
+          </div>
+          <div class="sub" style="margin-top:10px">"Pendientes" = casos completos o validados, sin dudas, que no se han enviado o han cambiado desde el último envío.</div>
+          <div id="eRes">${resultado || ""}</div>
+        </div>
+        <div class="tarjeta pad">
+          <h3>Configuración</h3>
+          <div class="sub" style="margin-bottom:12px">Los datos de la aplicación registrada por Informática y el enlace del Excel. Lo ideal es dejarlos en el archivo central <code>datos/envio.json</code> para que valgan para todos; aquí puede probarlos en este navegador.</div>
+          <form class="form" id="fEnv" onsubmit="return false">
+            <label>Id. de aplicación (cliente)<input class="inp" name="clientId" value="${esc(c.clientId || "")}" placeholder="00000000-0000-0000-0000-000000000000"></label>
+            <label>Id. de directorio (inquilino)<input class="inp" name="tenantId" value="${esc(c.tenantId || "")}" placeholder="00000000-0000-0000-0000-000000000000"></label>
+            <label>Enlace del Excel corporativo<input class="inp" name="excelUrl" value="${esc(c.excelUrl || "")}" placeholder="https://comunidaddemurcia.sharepoint.com/..."></label>
+            <label>Nombre de la tabla<input class="inp" name="tabla" value="${esc(c.tabla || "WILLEM")}"></label>
+            <div class="sub">Dirección de retorno que debe estar registrada en la aplicación: <code>${esc(new URL("auth.html", location.href).href)}</code></div>
+            <button class="btn" id="eGuardar">${icono("check")} Guardar en este navegador</button>
+          </form>
+        </div>
+      </div>`;
+    $("#eGuardar").onclick = () => {
+      const f = Object.fromEntries(new FormData($("#fEnv")));
+      ENV.guardarConfigLocal(f); toast("Configuración guardada en este navegador"); pintar();
+    };
+    $("#eProbar").onclick = async () => {
+      try {
+        const r = await ENV.probarConexion(S.dic);
+        pintar(`<div class="aviso-local" style="margin-top:14px">${icono("check")}<div>Conexión correcta como <b>${esc(r.cuenta || "")}</b>. Excel: <b>${esc(r.excel)}</b>, con la tabla preparada.</div></div>`);
+      } catch (e) { toast(e.message, "mal"); }
+    };
+    $("#eTodos").onclick = async (ev) => {
+      ev.target.disabled = true;
+      const filas = [];
+      for (const x of listos) {
+        try { const r = await enviarAlRegistro(x, { silencioso: true }); filas.push(`<li>${icono("check")} #${pad(x.numero)} ${r.accion}</li>`); }
+        catch (e) { filas.push(`<li style="color:var(--bad)">${icono("aviso")} #${pad(x.numero)}: ${esc(e.message)}</li>`); }
+      }
+      pintar(`<ul class="lista-envio">${filas.join("")}</ul>`);
+    };
+  };
+  await pintar();
 }
 
 // ===========================================================================
