@@ -332,7 +332,7 @@ a { color: var(--brand); text-decoration: none; }
 .seccion-cab .der { margin-left: auto; display: flex; gap: 8px; }
 .bloque-tit { display: flex; align-items: center; gap: 10px; margin: 22px 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .12em; color: var(--ink-3); font-weight: 700; }
 .bloque-tit::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-.campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
+.campos { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(330px, 100%), 1fr)); gap: 12px; }
 
 .campo {
   position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; transition: border-color .2s, box-shadow .2s;
@@ -554,3 +554,59 @@ textarea.inp { width: 100%; height: auto; min-height: 76px; padding: 10px 12px; 
 .lista-envio { list-style: none; padding: 0; margin: 14px 0 0; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 .lista-envio li { display: flex; gap: 8px; align-items: center; }
 .lista-envio .ico { width: 16px; height: 16px; }
+
+/* =====================================================================
+   MÓVIL Y TABLET
+   ===================================================================== */
+.menu-movil, .velo-menu { display: none; }
+@media (max-width: 1050px) {
+  /* Pestañas del caso: tira horizontal deslizable */
+  .indice { position: static; display: flex; gap: 6px; overflow-x: auto; padding: 8px; scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch; }
+  .indice a { flex: none; min-width: 190px; scroll-snap-align: start; }
+  .indice .sep, .indice .titulo-ind { display: none; }
+}
+@media (max-width: 900px) {
+  .app { display: block; }
+  .lateral { position: fixed; top: 0; left: 0; bottom: 0; width: 284px; height: 100vh; height: 100dvh; overflow-y: auto; z-index: 60;
+    transform: translateX(-105%); transition: transform .25s cubic-bezier(.2, .8, .2, 1); }
+  .lateral.abierto { transform: none; box-shadow: var(--shadow-3); }
+  .menu-movil { display: grid; place-items: center; position: fixed; top: 12px; left: 12px; z-index: 55; width: 44px; height: 44px; border-radius: 12px;
+    border: 1px solid var(--line-2); background: var(--surface); color: var(--ink); box-shadow: var(--shadow-1); cursor: pointer; }
+  .menu-movil .ico { width: 22px; height: 22px; }
+  body.menu-abierto .velo-menu { display: block; position: fixed; inset: 0; background: rgba(8, 14, 24, .45); z-index: 58; }
+  .barra { padding: 12px 16px 12px 68px; min-height: 68px; flex-wrap: wrap; gap: 8px; }
+  .barra h1 { font-size: 18px; }
+  .barra .der { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+  .contenido { padding: 8px 14px 40px; }
+  .tarjeta { overflow-x: auto; }
+  .tabla { min-width: 640px; }
+  .saludo { padding: 22px 20px; }
+  .saludo h2 { font-size: 22px; }
+  .cabecera-caso { padding: 18px; gap: 14px; }
+  .cabecera-caso .ic-grande { width: 48px; height: 48px; }
+  .cabecera-caso .t2 { font-size: 21px; }
+  .cabecera-caso .der { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 10px; }
+  .seccion-cab .der { margin-left: 0; flex-wrap: wrap; }
+  .nav-sec .btn { white-space: normal; height: auto; min-height: 48px; padding: 8px 14px; text-align: left; }
+  .pasos { flex-direction: column; }
+  .campo-num { flex-wrap: wrap; }
+  .campo-num input { width: 100%; }
+  .llave-cab, .carpeta-cta, .donut-wrap { flex-wrap: wrap; }
+  .login .heroe { padding: 28px 22px; }
+  .login .heroe h1 { font-size: 30px; }
+  .login .heroe .ecg { display: none; }
+  .grid { gap: 12px; }
+  .kpi .v { font-size: 24px; }
+}
+/* Pantallas táctiles: botones más grandes y con texto */
+@media (hover: none) {
+  .sino button { height: 40px; min-width: 70px; }
+  .op { height: 40px; }
+  .mb { height: 38px; padding: 0 11px; }
+  .limpiar { padding: 8px; }
+}
+@media (hover: none) and (min-width: 700px) { .mb span { display: inline; } }
+
+/* Tablas anchas: se desplazan dentro de su tarjeta en cualquier tamaño */
+.tarjeta:has(> .tabla) { overflow-x: auto; }
+.tabla td.codigo { word-break: break-all; }

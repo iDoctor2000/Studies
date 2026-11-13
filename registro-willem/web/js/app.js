@@ -286,7 +286,13 @@ function pintarEstructura() {
       </div>
     </aside>
     <main class="principal"><header class="barra" id="barra"></header><section class="contenido" id="contenido"></section></main>
+    <button class="menu-movil" id="btnMenu" aria-label="Abrir menú">${icono("menu")}</button>
+    <div class="velo-menu" id="veloMenu"></div>
   </div>`;
+  const menu = (abrir) => { $(".lateral").classList.toggle("abierto", abrir); document.body.classList.toggle("menu-abierto", abrir); };
+  $("#btnMenu").onclick = () => menu(!$(".lateral").classList.contains("abierto"));
+  $("#veloMenu").onclick = () => menu(false);
+  $(".lateral").addEventListener("click", (ev) => { if (ev.target.closest("a")) menu(false); });
   $("#btnSalir").onclick = async () => {
     await vaciarPendientes();
     if (navegador()) {
