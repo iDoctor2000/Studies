@@ -225,6 +225,8 @@ export async function exportarRegistro(soloValidados = false, formato = "xlsx") 
   const marcas = casos.flatMap((c) => Object.entries(c.valores).filter(([, x]) => MARCAS.includes(x)).sort()
     .map(([k, x]) => [c.numero, k, x === "NC" ? "Desconocido" : "Duda", c.valores[k + "_duda_nota"] || ""]));
   if (marcas.length) hojas.push(["Desconocido_Duda_NO_ENVIAR", [["patient_id", "variable", "estado", "nota_duda"], ...marcas]]);
+  const notas = casos.filter((c) => String(c.valores.nota_revision || "").trim()).map((c) => [c.numero, c.valores.nota_revision]);
+  if (notas.length) hojas.push(["Notas_revision_NO_ENVIAR", [["patient_id", "nota_revision"], ...notas]]);
   descargar(crearXlsx(hojas), `WILLEM_${SITE_ID}_${sello}.xlsx`);
 }
 

@@ -364,7 +364,7 @@ function pintarEstructura() {
 async function cargarCasos() {
   S.casos = await api("GET", "casos");
   S.casos.forEach((c) => { c.progreso = progresoCaso(S.modelo, c); c.dudas = dudasDelCaso(S.modelo, c); });
-  const nd = S.casos.reduce((a, c) => a + c.dudas.length, 0);
+  const nd = S.casos.reduce((a, c) => a + c.dudas.length, 0) + S.casos.filter(tieneNota).length;
   const elD = $("#nDudas"); if (elD) { elD.textContent = nd || ""; elD.classList.toggle("oculto", !nd); }
   const n = $("#nCasos"); if (n) n.textContent = S.casos.length;
   return S.casos;
@@ -463,10 +463,10 @@ async function pPanel() {
 async function pCasos(qs) {
   barra("Casos", "Registro WILLEM", `<a class="btn primario" href="#/nuevo">${icono("mas")} Nuevo caso</a>`);
   await cargarCasos();
-  const F = { enf: qs.get("enf") || "", estado: qs.get("estado") || "", q: "" };
+  const F = { enf: qs.get("enf") || "", estado: qs.get("estado") || "", q: "", nota: qs.get("revisar") === "1" };
   const cont = $("#contenido");
   const pintar = () => {
-    const lista = S.casos.filter((c) => (!F.enf || diagnosticosDe(c).includes(F.enf)) && (!F.estado || c.estado === F.estado) && (!F.q || pad(c.numero).includes(F.q.replace(/\D/g, "")) && F.q.replace(/\D/g, "")));
+    const lista = S.casos.filter((c) => (!F.nota || tieneNota(c)) && (!F.enf || diagnosticosDe(c).includes(F.enf)) && (!F.estado || c.estado === F.estado) && (!F.q || pad(c.numero).includes(F.q.replace(/\D/g, "")) && F.q.replace(/\D/g, "")));
     const cuenta = (g) => S.casos.filter((c) => diagnosticosDe(c).includes(g)).length;
     cont.innerHTML = `
       <div class="filtros">
@@ -476,11 +476,12 @@ async function pCasos(qs) {
       </div>
       <div class="filtros">
         ${[["", "Todos los estados"], ["borrador", "Borrador"], ["completo", "Completo"], ["validado", "Validado"]].map(([k, t]) => `<span class="chip ${F.estado === k ? "on" : ""}" data-estado="${k}">${t}</span>`).join("")}
+        <span class="chip chip-estrella ${F.nota ? "on" : ""}" id="fNota" style="--c:#d97706">${icono("estrella")} Para revisar <span class="n">${S.casos.filter(tieneNota).length}</span></span>
       </div>
       <div class="tarjeta">
         ${lista.length ? `<table class="tabla"><thead><tr><th>Caso</th><th>Diagnósticos del estudio</th><th>Completitud</th><th>Estado</th><th>Registro</th><th>Última modificación</th></tr></thead><tbody>
         ${lista.map((c) => `<tr data-n="${c.numero}" style="--c:${ENFERMEDADES[c.principal]?.color}">
-          <td><span class="num-caso"><small>#</small>${pad(c.numero)}</span></td>
+          <td><span class="num-caso"><small>#</small>${pad(c.numero)}</span> ${tieneNota(c) ? `<span class="estrella on" title="${esc(c.valores.nota_revision)}">${icono("estrella")}</span>` : ""}</td>
           <td><div class="diags-celda">${diagnosticosDe(c).map((g) => pillEnf(g, diagnosticosDe(c).length > 1)).join(" ")}</div></td>
           <td><div style="display:flex;align-items:center;gap:10px">${anillo(c.progreso.pct, 40, 4.5)}<span class="sub">${c.progreso.ok}/${c.progreso.tot}</span></div></td>
           <td>${estadoPill(c.estado)} ${c.dudas.length ? `<span class="pill sec" style="--c:#d97706" title="Dudas sin resolver">${icono("bandera")} ${c.dudas.length}</span>` : ""}</td>
@@ -490,6 +491,7 @@ async function pCasos(qs) {
       </div>`;
     $$("[data-enf]", cont).forEach((x) => (x.onclick = () => { F.enf = x.dataset.enf; pintar(); }));
     $$("[data-estado]", cont).forEach((x) => (x.onclick = () => { F.estado = x.dataset.estado; pintar(); }));
+    $("#fNota").onclick = () => { F.nota = !F.nota; pintar(); };
     $$("tr[data-n]", cont).forEach((x) => (x.onclick = () => (location.hash = `#/caso/${x.dataset.n}`)));
     const q = $("#q");
     q.oninput = () => { F.q = q.value; const pos = q.selectionStart; pintar(); const nq = $("#q"); nq.focus(); nq.setSelectionRange(pos, pos); };
@@ -599,6 +601,7 @@ function pintarCaso(animar = false) {
           ${soloLectura() ? "" : `<button class="btn pequeno" id="bDiag">${icono("editar")} Diagnósticos</button>`}</div></div>
       <div class="der">
         <span class="guardado" id="guardado">${icono("check")} Guardado</span>
+        ${botonNota(c)}
         ${botonEnvio(c)}
         <select id="selEstado" ${soloLectura() ? "disabled" : ""}>
           <option value="borrador" ${c.estado === "borrador" ? "selected" : ""}>Borrador</option>
@@ -632,6 +635,7 @@ function pintarCaso(animar = false) {
         <div id="seccion">${tab.bloques.filter((b) => b.items.some((it) => visible(it, c.valores))).map((b) => `${b.grupo ? `<div class="bloque-tit bloque-enf" style="--c:${ENFERMEDADES[b.grupo].color}">${icono(b.grupo)} ${esc(b.subtitulo)}</div>`
           : b.subtitulo ? `<div class="bloque-tit">${esc(b.subtitulo)}</div>` : ""}
           <div class="campos">${b.items.filter((it) => visible(it, c.valores)).map((it) => campoHTML(it, c.valores, animar)).join("")}</div>`).join("")}</div>
+        ${soloLectura() ? "" : `<div class="rellenar-abajo"><button class="btn grande" id="bRellenar2" title="Pone No en todas las preguntas Sí/No (y desplegables con opción No) que no haya contestado en esta pestaña">${icono("varita")} Todo lo que no he marcado, a «No»</button></div>`}
         <div class="nav-sec">
           ${ti > 0 ? `<a class="btn grande" href="#/caso/${c.numero}/${encodeURIComponent(tabs[ti - 1].id)}">${icono("flechaI")} ${esc(tabs[ti - 1].titulo)}</a>` : "<span></span>"}
           ${ti < tabs.length - 1 ? `<a class="btn color grande" href="#/caso/${c.numero}/${encodeURIComponent(tabs[ti + 1].id)}">${esc(tabs[ti + 1].titulo)} ${icono("flechaD")}</a>`
@@ -656,6 +660,8 @@ function pintarCaso(animar = false) {
   $("#bEnviar")?.addEventListener("click", () => enviarAlRegistro(E.caso));
   $("#selEstado").onchange = async (ev) => {
     await vaciarPendientes();
+    if (ev.target.value === "validado" && tieneNota(c) && !(await modal({ titulo: "Caso marcado para revisión", aceptar: "Validar igualmente",
+      html: `<p>Este paciente tiene una nota de revisión (★):</p><blockquote class="cita-nota">${esc(c.valores.nota_revision)}</blockquote><p class="sub">Si ya está revisado, puede borrar la nota desde la estrella.</p>` }))) return pintarCaso();
     if (ev.target.value === "validado" && dudasDelCaso(S.modelo, c).length) {
       toast("No se puede validar: hay dudas sin resolver en este caso", "mal"); return pintarCaso();
     }
@@ -679,6 +685,8 @@ function pintarCaso(animar = false) {
     const ok = await modal({ titulo: "Marcar el resto como Desconocido", aceptar: `Poner Desconocido en ${n}`, html: `<p>Se marcarán como <b>Desconocido</b> (lo he buscado y no consta) las preguntas sin contestar de <b>${esc(tab.titulo)}</b>.</p><p class="sub">En el Excel final irán vacías. Quedará anotado en el historial.</p>` });
     if (ok) { aplicar(cambios, "relleno_no"); toast(`${n} respuestas marcadas como Desconocido`); }
   });
+  $("#bRellenar2")?.addEventListener("click", () => $("#bRellenar").click());
+  $("#bNota")?.addEventListener("click", editarNota);
   $("#bRellenar")?.addEventListener("click", async () => {
     const items = tab.bloques.flatMap((b) => b.items);
     const cambios = rellenarNo(items, c.valores);
@@ -1274,12 +1282,46 @@ async function pEnvio() {
 }
 
 // ===========================================================================
+//  NOTA DE REVISIÓN (★): texto libre por paciente para que lo revise el equipo
+// ===========================================================================
+const tieneNota = (c) => !!String(c?.valores?.nota_revision || "").trim();
+
+function botonNota(c) {
+  const on = tieneNota(c);
+  return `<button class="btn btn-estrella ${on ? "on" : ""}" id="bNota" title="${on ? "Tiene nota de revisión: pulse para verla" : "Añadir una nota para que el equipo revise este paciente"}">${icono("estrella")}${on ? " Para revisar" : ""}</button>`;
+}
+
+async function editarNota() {
+  const c = E.caso;
+  let texto = c.valores.nota_revision || "";
+  await modal({
+    titulo: `Nota de revisión · caso #${pad(c.numero)}`, aceptar: "Guardar nota",
+    html: `<p class="sub" style="margin-top:0">Escriba aquí cualquier duda sobre este paciente para que la revise el equipo. Mientras haya texto, la estrella queda encendida y el caso aparece en el filtro «Para revisar».</p>
+      <textarea class="inp nota-larga" id="notaTxt" rows="9" placeholder="Por ejemplo: el informe de alta y el de la eco no coinciden en la FEVI; ¿qué fecha de diagnóstico usamos?">${esc(texto)}</textarea>
+      ${texto ? `<button class="btn fantasma peligro" id="notaBorrar" style="margin-top:8px">${icono("papelera")} Borrar la nota (revisado)</button>` : ""}`,
+    alAbrir: (m) => {
+      const t = $("#notaTxt", m); t.focus(); t.setSelectionRange(t.value.length, t.value.length);
+      $("#notaBorrar", m)?.addEventListener("click", () => { t.value = ""; m.querySelector("[data-ok]").click(); });
+    },
+    alAceptar: async (m) => {
+      const nuevo = $("#notaTxt", m).value.trim();
+      if (nuevo !== (c.valores.nota_revision || "")) {
+        aplicar({ nota_revision: nuevo || null });
+        await vaciarPendientes();
+        toast(nuevo ? "Nota guardada: caso marcado para revisión" : "Nota borrada");
+      }
+    },
+  });
+}
+
+// ===========================================================================
 //  DUDAS PENDIENTES
 // ===========================================================================
 async function pDudas() {
-  barra("Dudas pendientes", "Revisión");
+  barra("Dudas y revisión", "Revisión");
   await cargarCasos();
   const filas = S.casos.flatMap((c) => c.dudas.map((d) => ({ c, d }))).sort((a, b) => a.c.numero - b.c.numero);
+  const conNota = S.casos.filter(tieneNota).sort((a, b) => a.numero - b.numero);
   $("#contenido").innerHTML = `<div class="aviso-local">${icono("bandera")}<div>Preguntas marcadas como <b>Duda</b> por quien introdujo los datos. Un caso con dudas abiertas <b>no se puede validar</b>.
       Para resolverla, abra el caso y conteste Sí, No o Desconocido.</div></div>
     <div class="tarjeta">${filas.length ? `<table class="tabla"><thead><tr><th>Caso</th><th>Pregunta</th><th>Pestaña</th><th>Nota de la duda</th><th>Última modificación</th></tr></thead><tbody>
@@ -1287,7 +1329,13 @@ async function pDudas() {
         <td><span class="num-caso"><small>#</small>${pad(c.numero)}</span><div style="margin-top:4px">${pillEnf(c.principal, true)}</div></td>
         <td><b>${esc(d.etiqueta)}</b><div class="codigo sub">${esc(d.codigo)}</div></td><td class="sub">${esc(d.tituloPestana)}</td>
         <td>${d.nota ? esc(d.nota) : `<span class="sub">— sin nota —</span>`}</td><td class="quien">${relativo(c.modificado)}<small>por ${esc(c.modificado_por)}</small></td></tr>`).join("")}
-      </tbody></table>` : `<div class="vacio">${icono("check")}<p>No hay dudas pendientes. ¡Todo claro!</p></div>`}</div>`;
+      </tbody></table>` : `<div class="vacio">${icono("check")}<p>No hay dudas pendientes en preguntas concretas.</p></div>`}</div>
+    <div class="bloque-tit" style="margin-top:26px">${icono("estrella")} Pacientes marcados para revisión (${conNota.length})</div>
+    <div class="tarjeta">${conNota.length ? `<table class="tabla"><thead><tr><th>Caso</th><th>Nota de revisión</th><th>Última modificación</th></tr></thead><tbody>
+      ${conNota.map((c) => `<tr data-ir="#/caso/${c.numero}"><td><span class="num-caso"><small>#</small>${pad(c.numero)}</span> <span class="estrella on">${icono("estrella")}</span>
+        <div style="margin-top:4px">${diagnosticosDe(c).map((g) => pillEnf(g, true)).join(" ")}</div></td>
+        <td class="texto-nota">${esc(c.valores.nota_revision)}</td><td class="quien">${relativo(c.modificado)}<small>por ${esc(c.modificado_por)}</small></td></tr>`).join("")}
+      </tbody></table>` : `<div class="vacio">${icono("estrella")}<p>Ningún paciente marcado con estrella.</p></div>`}</div>`;
   $$("tr[data-ir]").forEach((tr) => (tr.onclick = () => (location.hash = tr.dataset.ir)));
 }
 

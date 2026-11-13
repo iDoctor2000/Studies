@@ -61,6 +61,8 @@ def _valores(rnd, principal, hoy):
         si = rnd.random() < 0.55
         v[k] = 1 if si else 0
     v["diabetes_mellitus_type_1"] = 0
+    v["diabetes_other"] = 0
+    v["diabetes_no"] = 0 if v["diabetes_mellitus_type_2"] else 1
 
     if principal == "IC":
         fevi = rnd.choice([28, 32, 35, 38, 45, 47, 55, 60])
@@ -168,6 +170,14 @@ def poblar(ruta_db, ruta_llave, hash_pw, diagnosticos):
                 v[e] = 1 if si else 0
                 if si:
                     v[e + "_date"] = (hoy - dt.timedelta(days=rnd.randint(10, 300))).isoformat()
+            reh = rnd.random() < 0.3
+            v["rehospitalization"] = 1 if reh else 0
+            v["rehospitalizations_number"] = rnd.randint(1, 3) if reh else 0
+            if reh:
+                v["rehospitalization_hf"], v["rehospitalization_hf_date"] = 1, (hoy - dt.timedelta(days=rnd.randint(20, 200))).isoformat()
+                v["rehospitalization_no_hf"] = 0
+            if rnd.random() < 0.1:
+                v["nota_revision"] = "Revisar: el informe de alta y el de la eco no coinciden en la FEVI."
             # Algunas respuestas "Desconocido" y "Duda"
             if rnd.random() < 0.4:
                 v["family_history_heart_disease"] = "NC"

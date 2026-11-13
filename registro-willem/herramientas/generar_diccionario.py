@@ -423,7 +423,7 @@ COL_GRUPO = {"HF": "IC", "ATTR": "ATTR", "AS": "EAO", "HCM": "MCH", "MI": "IAM",
 PESTANAS = [
     ("1. Datos del paciente", ["01. Metadatos", "02. Demografía y hábitos"]),
     ("2. Diagnósticos", ["03. Diagnóstico y clasificación", "04. ATTR: marcadores", "05. MI: gravedad y tratamiento"]),
-    ("3. Situación basal y constantes", ["15. Constantes"]),
+    ("3. Situación basal y constantes", ["15. Constantes", "15. Clase funcional NYHA"]),
     ("4. Antecedentes y comorbilidades", ["16. Factores de riesgo cardiovascular", "17. Historia cardiovascular", "19. Comorbilidades"]),
     ("5. Procedimientos diagnósticos y dispositivos", ["14. Analítica y ECG", "06. Conducción y ECG", "08. Ecocardiograma general",
                                                        "09. Eco estenosis aórtica", "11. Coronariografía / MI", "05. MI: revascularización",
@@ -459,7 +459,7 @@ REGLAS = {
     142: {"oculto": "Sí", "ayuda_ES": "No se mide BNP en nuestro laboratorio: se deja en blanco."},
     144: {"oculto": "Sí", "ayuda_ES": "No se mide troponina I en nuestro laboratorio: se deja en blanco."},
     148: {"oculto": "Sí", "ayuda_ES": "La fecha del ECG vendrá con los datos del iECG."},
-    164: {"tipo_formulario": "enum", "copiar_de": "baseline_status", "texto_ES": "Clase funcional NYHA",
+    164: {"tipo_formulario": "enum", "copiar_de": "baseline_status", "texto_ES": "Clase funcional NYHA", "pestaña": "15. Clase funcional NYHA",
           "ayuda_ES": "La fecha se toma de la valoración basal."},
     191: {"texto_ES": "Permanente o crónica"},
     196: {"mostrar_solo_si": "prior_arrhythmias = 1"},
@@ -473,11 +473,20 @@ REGLAS = {
     56: {"patologias": "ISQ IAM", "mostrar_solo_si": ""},
     57: {"mostrar_solo_si": ""}, 58: {"mostrar_solo_si": ""}, 59: {"mostrar_solo_si": ""},
     60: {"mostrar_solo_si": ""}, 61: {"mostrar_solo_si": ""}, 62: {"mostrar_solo_si": ""},
-    86: {"mostrar_solo_si": ""}, 87: {"mostrar_solo_si": ""}, 88: {"mostrar_solo_si": ""},
+    87: {"mostrar_solo_si": ""}, 88: {"mostrar_solo_si": ""},
     # Los diagnósticos solo se preguntan al principio: los duplicados se copian
     81: {"oculto": "Sí", "ayuda_ES": "Se rellena al elegir 'Otros' en los diagnósticos del caso."},
     173: {"oculto": "Sí", "copiar_de": "long_qt_syndrome", "ayuda_ES": "Se copia del diagnóstico inicial."},
     222: {"oculto": "Sí", "copiar_de": "heart_failure", "ayuda_ES": "Se copia del diagnóstico inicial."},
+    # Stents: tras el tipo de revascularización y solo si hubo intervencionismo
+    86: {"pestaña": "05. MI: revascularización", "mostrar_solo_si": "coronary_revascularization_pci = 1"},
+    162: {"texto_ES": "Antecedentes familiares de enfermedad coronaria precoz (<50 años)"},
+    # NYHA en "Situación basal y constantes"
+    165: {"pestaña": "15. Clase funcional NYHA"}, 166: {"pestaña": "15. Clase funcional NYHA"},
+    167: {"pestaña": "15. Clase funcional NYHA"}, 168: {"pestaña": "15. Clase funcional NYHA"},
+    # Rehospitalizaciones: el número solo si hubo rehospitalización (si no, 0)
+    230: {"texto_ES": "Número de rehospitalizaciones", "mostrar_solo_si": "rehospitalization = 1",
+          "valor_por_defecto": "rehospitalization = 0 -> 0"},
     # Seguimiento: el fallecimiento es un evento más, con su fecha
     228: {"texto_ES": "Fallecimiento", "tipo_formulario": "boolean, date"},
     229: {"oculto": "Sí", "copiar_de": "death_date", "ayuda_ES": "Fecha del evento 'Fallecimiento'."},
@@ -564,6 +573,47 @@ def aplicar_propuesta(salida, ruta):
     if llave_vi and tipo_fevi:
         out.remove(llave_vi)
         out.insert(out.index(tipo_fevi), llave_vi)
+    # ---- Variables propias (no van al registro: salen en la hoja interna) ----
+    def nueva(cod, texto, tipo, despues_de, ayuda="", cond="", padre="", defecto="", seleccion=""):
+        ref = next(d for d in out if d.get("_fila") == despues_de or d.get("codigo_variable") == despues_de)
+        n = {k: "" for k in CABECERA}
+        n.update({"pestaña": ref["pestaña"], "codigo_variable": cod, "codigo_provisional": "LOCAL", "texto_ES": texto,
+                  "ayuda_ES": ayuda, "tipo": tipo, "tipo_formulario": tipo, "patologias": ref["patologias"],
+                  "mostrar_solo_si": cond, "exportar_al_registro": "Solo local", "pertenece_a_pregunta": padre,
+                  "valor_por_defecto": defecto, "tipo_seleccion": seleccion,
+                  "columnas_en_exportacion": "(no se exporta; se exportan las opciones)" if seleccion
+                  else (f"{cod} ; {cod}_date" if tipo == "boolean, date" else cod)})
+        n["control_en_pantalla"] = control_formulario(n)
+        out.insert(out.index(ref) + 1, n)
+        return n
+
+    def mover_tras(fila, despues_de):
+        d = next(x for x in out if x.get("_fila") == fila)
+        ref = next(x for x in out if x.get("_fila") == despues_de or x.get("codigo_variable") == despues_de)
+        out.remove(d)
+        out.insert(out.index(ref) + 1, d)
+        return d
+
+    # Diabetes: un único desplegable (No / Tipo 1 / Tipo 2 / Otros) que rellena las columnas del registro
+    DM = "Diabetes mellitus"
+    nueva("diabetes", DM, "enum", 156, seleccion="única",
+          ayuda="Rellena las columnas del registro de diabetes tipo 1 y tipo 2.")
+    nueva("diabetes_no", "No", "boolean", "diabetes", padre=DM)
+    for fila, texto in ((157, "Tipo 1"), (158, "Tipo 2")):
+        d = mover_tras(fila, "diabetes_no" if fila == 157 else 157)
+        d.update(texto_ES=texto, pertenece_a_pregunta=DM)
+        d["control_en_pantalla"] = control_formulario(d)
+    nueva("diabetes_other", "Otros", "boolean", 158, padre=DM, ayuda="Otros tipos de diabetes (no va al registro).")
+
+    # Stents justo después del tipo de revascularización
+    mover_tras(86, 98)
+
+    # Rehospitalizaciones
+    nueva("rehospitalization", "Rehospitalización", "boolean", 229)
+    nueva("rehospitalization_hf", "Rehospitalización por IC", "boolean, date", 230, cond="rehospitalization = 1")
+    nueva("rehospitalization_no_hf", "Rehospitalización por causa no IC", "boolean, date", "rehospitalization_hf",
+          cond="rehospitalization = 1")
+
     # Orden del CRF original: el Excel final se exporta siempre en este orden
     for d in out:
         d["orden_registro"] = d.get("_fila") if d.get("exportar_al_registro") == "Sí" else ""

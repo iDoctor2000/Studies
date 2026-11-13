@@ -625,3 +625,16 @@ textarea.inp { width: 100%; height: auto; min-height: 76px; padding: 10px 12px; 
 .campo .lab { min-width: 0; }
 .campo .lab > span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .campo .lab .cod { flex-shrink: 1; min-width: 0; max-width: 48%; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Nota de revisión (estrella) ---------- */
+.estrella { display: inline-grid; vertical-align: middle; color: var(--ink-3); }
+.estrella .ico { width: 17px; height: 17px; }
+.estrella.on { color: #f59e0b; }
+.estrella.on .ico, .btn-estrella.on .ico { fill: #fbbf24; stroke: #d97706; }
+.cabecera-caso .btn-estrella { background: rgba(255, 255, 255, .14); color: #fff; }
+.cabecera-caso .btn-estrella.on { background: #fef3c7; color: #92400e; border-color: #fbbf24; }
+.nota-larga { width: 100%; min-height: 200px; font-size: 15px; line-height: 1.5; }
+.cita-nota { margin: 8px 0; padding: 10px 14px; border-left: 3px solid #f59e0b; background: var(--warn-soft); border-radius: 8px; color: var(--ink); white-space: pre-wrap; }
+.texto-nota { white-space: pre-wrap; max-width: 560px; }
+.rellenar-abajo { display: flex; justify-content: center; margin-top: 22px; }
+.rellenar-abajo .btn { border-style: dashed; }

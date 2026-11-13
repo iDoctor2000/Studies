@@ -767,6 +767,11 @@ class Manejador(BaseHTTPRequestHandler):
         marcas = filas_marcas(solo_val)
         if len(marcas) > 1:
             hojas.append(("Desconocido_Duda_NO_ENVIAR", marcas))
+        with db() as con:
+            notas = [[r["numero"], json.loads(r["valores"]).get("nota_revision")] for r in con.execute("SELECT numero, valores FROM casos ORDER BY numero")]
+        notas = [n for n in notas if str(n[1] or "").strip()]
+        if notas:
+            hojas.append(("Notas_revision_NO_ENVIAR", [["patient_id", "nota_revision"]] + notas))
         data = crear_xlsx(hojas)
         self._descarga(data, f"WILLEM_{SITE_ID}_{sello}.xlsx",
                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")

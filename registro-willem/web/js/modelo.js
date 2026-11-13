@@ -176,6 +176,11 @@ export function rellenarNo(items, v) {
     if (it.tipoCampo === "multi" && !esMarca(v[it.codigo]) && it.opciones.every((o) => v[o.codigo] === undefined || v[o.codigo] === null)) {
       it.opciones.forEach((o) => (cambios[o.codigo] = 0));
     }
+    // Desplegables con una opción "No" (p. ej. diabetes): sin contestar -> "No"
+    const opNo = it.tipoCampo === "single" && it.opciones.find((o) => /^no$/i.test(o.etiqueta));
+    if (opNo && !esMarca(v[it.codigo]) && it.opciones.every((o) => v[o.codigo] === undefined || v[o.codigo] === null)) {
+      it.opciones.forEach((o) => (cambios[o.codigo] = o === opNo ? 1 : 0));
+    }
   }
   return cambios;
 }
