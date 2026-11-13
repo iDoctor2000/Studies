@@ -630,7 +630,7 @@ function pintarCaso(animar = false) {
           <div>${tab.grupo ? pillEnf(tab.grupo) : ""}<h2 style="margin-top:${tab.grupo ? 8 : 0}px">${esc(tab.titulo)}</h2>
             <div class="sub">${pt.ok} de ${pt.tot} respondidos${tab.grupo ? " · campos específicos de esta enfermedad" : ""}</div></div>
           <div class="der">${soloLectura() ? "" : `<button class="btn fantasma" id="bRellenarNC" title="Pone Desconocido en todas las preguntas Sí/No y listas sin contestar de esta pestaña">${icono("interrogacion")} Resto: Desconocido</button>
-            <button class="btn" id="bRellenar" title="Pone No (0) en todos los Sí/No que estén sin contestar en esta pestaña">${icono("varita")} Marcar el resto como No</button>`}</div>
+            <button class="btn" id="bRellenar" title="Pone No en todas las preguntas Sí/No y listas con opción «No» o «Ninguno» que estén sin contestar en esta pestaña">${icono("varita")} Marcar el resto como No</button>`}</div>
         </div>
         <div id="seccion">${tab.bloques.filter((b) => b.items.some((it) => visible(it, c.valores))).map((b) => `${b.grupo ? `<div class="bloque-tit bloque-enf" style="--c:${ENFERMEDADES[b.grupo].color}">${icono(b.grupo)} ${esc(b.subtitulo)}</div>`
           : b.subtitulo ? `<div class="bloque-tit">${esc(b.subtitulo)}</div>` : ""}
@@ -690,14 +690,15 @@ function pintarCaso(animar = false) {
   $("#bRellenar")?.addEventListener("click", async () => {
     const items = tab.bloques.flatMap((b) => b.items);
     const cambios = rellenarNo(items, c.valores);
-    const n = Object.keys(cambios).length;
+    const n = new Set(Object.keys(cambios).map((k) => S.modelo.porCodigo[k]?.padre?.codigo || k)).size;
     if (!n) return toast("No hay preguntas Sí/No pendientes en esta pestaña", "info");
-    const ok = await modal({ titulo: "Marcar el resto como No", aceptar: `Poner No en ${n}`, html: `<p>Se pondrá <b>No (0)</b> en las preguntas Sí/No de <b>${esc(tab.titulo)}</b> que estén sin contestar.</p><p class="sub">Los números, fechas y listas de una sola opción no se tocan. Quedará anotado en el historial.</p>` });
+    const ok = await modal({ titulo: "Marcar el resto como No", aceptar: `Poner No en ${n}`, html: `<p>Se pondrá <b>No</b> en las preguntas de <b>${esc(tab.titulo)}</b> que estén sin contestar: las Sí/No y las listas que tengan la opción «No» o «Ninguno» (tabaquismo, diabetes, trastornos de la conducción…).</p><p class="sub">Lo ya marcado (Sí, Desconocido, Duda), los números y las fechas no se tocan. Quedará anotado en el historial.</p>` });
     if (ok) { aplicar(cambios, "relleno_no"); toast(`${n} respuestas puestas a No`); }
   });
   const sec = $("#seccion");
   sec.addEventListener("click", alClicar);
   sec.addEventListener("change", alCambiar);
+  sec.addEventListener("input", (ev) => { if (ev.target.classList?.contains("fecha")) mascaraFecha(ev.target, ev); });
   actualizarGuardado();
 }
 
@@ -716,7 +717,8 @@ function campoHTML(it, v, animar) {
     }
   })();
   const cab = `<div class="lab"><span>${esc(it.etiqueta)}${prov}</span>${cod}</div>${ayuda}`;
-  const fechaInp = (k, val) => `<input type="date" class="inp" data-in="${esc(k)}" data-t="fecha" data-foco="${esc(k)}" value="${esc(val || "")}" max="${new Date().toISOString().slice(0, 10)}">`;
+  const fechaInp = (k, val) => `<input type="text" class="inp fecha" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="dd/mm/aaaa"
+      data-in="${esc(k)}" data-t="fecha" data-foco="${esc(k)}" value="${esc(isoAFecha(val))}">`;
   const limpiar = (ks) => `<button class="limpiar" data-limpiar="${esc(ks.join(","))}" title="Borrar respuesta">${icono("x")}</button>`;
   let ctrl = "", ancho = false, aviso = "";
   const botonesMarca = () => `<div class="marcas-bt">
@@ -814,6 +816,36 @@ function alClicar(ev) {
   }
 }
 
+// ---- Fechas tecleadas: dd/mm/aaaa ----
+const hoyIso = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); };
+function isoAFecha(v) {
+  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : "";
+}
+function fechaAIso(t) {
+  const m = String(t).trim().match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/) || String(t).trim().match(/^(\d{2})(\d{2})(\d{4})$/);
+  if (!m) return null;
+  const [d, mes, a] = [+m[1], +m[2], +m[3]];
+  const f = new Date(Date.UTC(a, mes - 1, d));
+  if (f.getUTCFullYear() !== a || f.getUTCMonth() !== mes - 1 || f.getUTCDate() !== d) return null; // p. ej. 31/02
+  return `${a}-${String(mes).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+/**
+ * Mientras se escribe: las barras se ponen solas (16042026 → 16/04/2026).
+ * Si la persona escribe sus propias barras ("5/3/1948"), se respetan y se completan los ceros.
+ */
+function mascaraFecha(el, ev) {
+  if (ev.inputType && ev.inputType.startsWith("delete")) return; // al borrar, no reescribir
+  // "5/" → "05/": un día o mes de una cifra seguido de barra se completa con un cero
+  const conCeros = el.value.replace(/(^|\D)(\d)(?=\D)/g, "$10$2");
+  const dig = conCeros.replace(/\D/g, "").slice(0, 8);
+  let s = dig.slice(0, 2);
+  if (dig.length > 2) s += "/" + dig.slice(2, 4);
+  if (dig.length > 4) s += "/" + dig.slice(4);
+  if (dig.length === 2 || dig.length === 4) s += "/";
+  el.value = s;
+}
+
 function alCambiar(ev) {
   if (soloLectura()) return;
   const el = ev.target;
@@ -827,6 +859,15 @@ function alCambiar(ev) {
       if (!isFinite(x)) { toast("Escriba un número (use coma o punto para decimales)", "mal"); el.value = E.caso.valores[k] ?? ""; return; }
       if (t === "entero" && !Number.isInteger(x)) { toast("Este campo es un número entero", "mal"); el.value = E.caso.valores[k] ?? ""; return; }
       val = x;
+    }
+  } else if (t === "fecha") {
+    if (val === "") val = null;
+    else {
+      const iso = fechaAIso(val);
+      if (!iso) { toast("Fecha no válida. Escríbala como dd/mm/aaaa (por ejemplo 16/04/1950)", "mal"); el.value = isoAFecha(E.caso.valores[k]); el.focus(); return; }
+      if (iso > hoyIso()) { toast("La fecha no puede ser posterior a hoy", "mal"); el.value = isoAFecha(E.caso.valores[k]); el.focus(); return; }
+      if (iso < "1900-01-01") { toast("Revise el año: es anterior a 1900", "mal"); el.value = isoAFecha(E.caso.valores[k]); el.focus(); return; }
+      val = iso;
     }
   } else if (val === "") val = null;
   aplicar({ [k]: val });

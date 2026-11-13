@@ -173,14 +173,12 @@ export function rellenarNo(items, v) {
     if ((it.tipoCampo === "sino" || it.tipoCampo === "sinofecha") && (v[it.codigo] === undefined || v[it.codigo] === null)) {
       cambios[it.codigo] = 0;
     }
-    if (it.tipoCampo === "multi" && !esMarca(v[it.codigo]) && it.opciones.every((o) => v[o.codigo] === undefined || v[o.codigo] === null)) {
-      it.opciones.forEach((o) => (cambios[o.codigo] = 0));
-    }
-    // Desplegables con una opción "No" (p. ej. diabetes): sin contestar -> "No"
-    const opNo = it.tipoCampo === "single" && it.opciones.find((o) => /^no$/i.test(o.etiqueta));
-    if (opNo && !esMarca(v[it.codigo]) && it.opciones.every((o) => v[o.codigo] === undefined || v[o.codigo] === null)) {
-      it.opciones.forEach((o) => (cambios[o.codigo] = o === opNo ? 1 : 0));
-    }
+    if (!["single", "multi"].includes(it.tipoCampo) || esMarca(v[it.codigo])) continue;
+    if (!it.opciones.every((o) => v[o.codigo] === undefined || v[o.codigo] === null)) continue;
+    // Listas con opción "No" / "Ninguno" (tabaquismo, diabetes, trastornos de conducción…): sin contestar -> esa opción
+    const opNo = it.opciones.find((o) => /^(no|ninguno|ninguna)$/i.test(o.etiqueta.trim()));
+    if (opNo) it.opciones.forEach((o) => (cambios[o.codigo] = o === opNo ? 1 : 0));
+    else if (it.tipoCampo === "multi") it.opciones.forEach((o) => (cambios[o.codigo] = 0));
   }
   return cambios;
 }

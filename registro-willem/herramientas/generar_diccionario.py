@@ -484,6 +484,10 @@ REGLAS = {
     # NYHA en "Situación basal y constantes"
     165: {"pestaña": "15. Clase funcional NYHA"}, 166: {"pestaña": "15. Clase funcional NYHA"},
     167: {"pestaña": "15. Clase funcional NYHA"}, 168: {"pestaña": "15. Clase funcional NYHA"},
+    # Tabaquismo: a factores de riesgo (bajo dislipemia); "Exfumador (>1 año)" y "No"
+    36: {"pestaña": "16. Factores de riesgo cardiovascular"}, 37: {"pestaña": "16. Factores de riesgo cardiovascular"},
+    38: {"pestaña": "16. Factores de riesgo cardiovascular", "texto_ES": "Exfumador (>1 año)"},
+    39: {"pestaña": "16. Factores de riesgo cardiovascular", "texto_ES": "No"},
     # Rehospitalizaciones: el número solo si hubo rehospitalización (si no, 0)
     230: {"texto_ES": "Número de rehospitalizaciones", "mostrar_solo_si": "rehospitalization = 1",
           "valor_por_defecto": "rehospitalization = 0 -> 0"},
@@ -607,6 +611,13 @@ def aplicar_propuesta(salida, ruta):
 
     # Stents justo después del tipo de revascularización
     mover_tras(86, 98)
+
+    # Raza: "Hispana / latina" la primera opción
+    mover_tras(32, 27)
+
+    # Tabaquismo justo debajo de dislipemia (la lista y sus opciones, en orden)
+    for fila, tras in ((36, 159), (37, 36), (38, 37), (39, 38)):
+        mover_tras(fila, tras)
 
     # Rehospitalizaciones
     nueva("rehospitalization", "Rehospitalización", "boolean", 229)
