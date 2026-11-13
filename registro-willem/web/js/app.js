@@ -137,7 +137,7 @@ async function enrutar() {
   await vaciarPendientes();
   const [ruta, query] = (location.hash.slice(2) || "panel").split("?");
   const qs = new URLSearchParams(query || "");
-  const [pag, a, b] = ruta.split("/");
+  const [pag, a, b] = ruta.split("/").map((x) => { try { return decodeURIComponent(x); } catch { return x; } });
   $$(".nav a").forEach((x) => x.classList.toggle("activo", x.dataset.pag === pag || (pag === "caso" && x.dataset.pag === "casos")));
   window.scrollTo(0, 0);
   const c = $("#contenido");
@@ -694,7 +694,7 @@ function pintarCaso(animar = false) {
 }
 
 function campoHTML(it, v, animar) {
-  const cod = `<span class="cod" title="Código en el registro">${esc(it.codigo)}</span>`;
+  const cod = `<span class="cod" title="Código en el registro: ${esc(it.codigo)}">${esc(it.codigo)}</span>`;
   const prov = it.provisional ? ` <span class="prov" title="Este código no existe en el CRF oficial">PROVISIONAL</span>` : "";
   const ayuda = it.ayuda && !/^DUPLICADO|Solapa/.test(it.ayuda) ? `<div class="ayuda">${esc(it.ayuda)}</div>` : "";
   const est = animar ? "" : ' style="animation:none"';
@@ -1049,13 +1049,15 @@ async function pLlave() {
         <div class="tarjeta pad">
           ${asignado ? `<div class="numero-asignado"><div class="sub">Número de caso asignado</div><div class="n">#${pad(asignado)}</div>
             <a class="btn primario grande" href="#/nuevo?n=${asignado}" style="margin-top:10px">${icono("mas")} Crear el caso ahora</a>
-            <div class="sub" style="margin-top:10px">Entregue este número (y solo este) a quien vaya a introducir los datos.</div></div>`
+            <div class="sub" style="margin-top:10px">Entregue este número (y solo este) a quien vaya a introducir los datos.</div>
+            <button class="btn fantasma" id="llOtro" style="margin-top:8px">${icono("mas")} Dar de alta otro paciente</button></div>`
           : `<h3>Dar de alta un paciente</h3><div class="sub" style="margin-bottom:16px">Se le asignará el siguiente número de caso libre.</div>
           <form class="form" id="fl"><label>CIP autonómico<input class="inp" name="cip" autocomplete="off"></label>
             <label>CARM<input class="inp" name="carm" autocomplete="off"></label><label>NHC<input class="inp" name="nhc" autocomplete="off"></label>
             <label>Notas (opcional)<input class="inp" name="notas" autocomplete="off"></label><div class="error" id="errL"></div>
             <button class="btn primario grande">${icono("llave")} Asignar número de caso</button></form>`}
         </div></div>`;
+    $("#llOtro")?.addEventListener("click", () => pintar());
     $("#llGuardar")?.addEventListener("click", () => L.exportarLlave());
     $("#llCargar")?.addEventListener("change", async (ev) => {
       try { const n = await L.importarLlave(ev.target.files[0]); toast(`${n} pacientes añadidos al libro llave`); pintar(); } catch (e) { toast(e.message, "mal"); }

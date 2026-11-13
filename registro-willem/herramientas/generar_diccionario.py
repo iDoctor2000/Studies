@@ -558,6 +558,15 @@ def aplicar_propuesta(salida, ruta):
                 d.update(oculto="Sí", copiar_de=f"{cod}_date")
         d["control_en_pantalla"] = control_formulario(d)
         out.append(d)
+    # Pregunta llave delante de su lista: "Disfunción VI" (50) antes de "Tipo según FEVI" (49)
+    llave_vi = next((d for d in out if d.get("_fila") == 50), None)
+    tipo_fevi = next((d for d in out if d.get("_fila") == 49), None)
+    if llave_vi and tipo_fevi:
+        out.remove(llave_vi)
+        out.insert(out.index(tipo_fevi), llave_vi)
+    # Orden del CRF original: el Excel final se exporta siempre en este orden
+    for d in out:
+        d["orden_registro"] = d.get("_fila") if d.get("exportar_al_registro") == "Sí" else ""
     # Fallecimiento como opción de "Eventos durante el seguimiento"
     muerte = next((d for d in out if d.get("_fila") == 228), None)
     eventos = next((d for d in out if d.get("_fila") == 231), None)
@@ -590,8 +599,8 @@ CABECERA_BASE = [
     "valor_min", "valor_max", "valor_fijo", "exportar_al_registro",
     "columnas_en_exportacion", "comentarios_equipo",
 ]
-CABECERA = CABECERA_BASE[:2] + ["bloque"] + CABECERA_BASE[2:-1] + ["tipo_formulario", "oculto", "valor_por_defecto", "copiar_de", "comentarios_equipo"]
-ANCHOS = [6, 30, 26, 38, 13, 30, 45, 45, 40, 13, 22, 26, 12, 16, 34, 9, 9, 11, 11, 44, 16, 9, 22, 30, 40]
+CABECERA = CABECERA_BASE[:2] + ["bloque"] + CABECERA_BASE[2:-1] + ["tipo_formulario", "oculto", "valor_por_defecto", "copiar_de", "orden_registro", "comentarios_equipo"]
+ANCHOS = [6, 30, 26, 38, 13, 30, 45, 45, 40, 13, 22, 26, 12, 16, 34, 9, 9, 11, 11, 44, 16, 9, 22, 30, 10, 40]
 
 
 def estilo_cabecera(ws, ncols):
@@ -703,7 +712,7 @@ def write(dst, salida):
     # --- Plantilla de exportación ---------------------------------------
     ex = out.create_sheet("Plantilla_exportacion")
     cols = []
-    for f in salida:
+    for f in sorted(salida, key=lambda d: d.get("orden_registro") or 99999):
         exp = f["columnas_en_exportacion"]
         if exp.startswith("(") or f["exportar_al_registro"] != "Sí":
             continue

@@ -20,9 +20,13 @@ export const diagnosticosDelCaso = (caso) => [caso.principal, ...(caso.secundari
 export const MARCAS = ["NC", "DUDA"];
 const FIJAS = ["site_id", "patient_id", "authored_at"];
 
+// Las columnas del Excel final siguen SIEMPRE el orden del CRF original (columna orden_registro),
+// aunque el formulario muestre los campos en otro orden.
+const ordenRegistro = (f) => (Number(f.orden_registro) > 0 ? Number(f.orden_registro) : 1e6);
 export function columnasRegistro(dic, soloLocal = false) {
   const cols = [];
-  for (const f of [...dic.campos, ...(dic.locales || [])]) {
+  const campos = [...dic.campos, ...(dic.locales || [])].map((f, i) => [f, i]).sort((a, b) => ordenRegistro(a[0]) - ordenRegistro(b[0]) || a[1] - b[1]).map(([f]) => f);
+  for (const f of campos) {
     const exp = String(f.exportar_al_registro || "");
     const esLocal = exp.toLowerCase().startsWith("solo local");
     if (exp.toLowerCase() === "no" || esLocal !== soloLocal) continue;
@@ -33,9 +37,10 @@ export function columnasRegistro(dic, soloLocal = false) {
   return cols;
 }
 
-/** Cabecera del Excel final, en el orden del registro. */
+/** Cabecera del Excel final: exactamente las columnas del CRF original, en su orden. */
 export function cabeceraRegistro(dic) {
-  return [...FIJAS, ...columnasRegistro(dic).filter((c) => !FIJAS.includes(c))];
+  const cols = columnasRegistro(dic);
+  return [...FIJAS.filter((c) => !cols.includes(c)), ...cols];
 }
 
 function copias(dic) {

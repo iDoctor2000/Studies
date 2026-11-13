@@ -60,6 +60,7 @@ export function construirModelo(dic) {
       items.push(grupo);
       continue;
     }
+    if (txt(r.pertenece_a_pregunta) && !grupo) console.warn("Diccionario: la opción", codigo, "no va justo después de su pregunta");
     if (txt(r.pertenece_a_pregunta) && grupo) {
       grupo.opciones.push({ codigo, etiqueta: base.etiqueta, conFecha: /date/.test(base.tipo), ayuda: base.ayuda, defecto: base.defecto });
       continue;

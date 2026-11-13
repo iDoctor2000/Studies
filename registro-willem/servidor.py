@@ -141,9 +141,15 @@ def diccionario():
 
 
 def columnas_exportacion(solo_local=False):
+    """Columnas del Excel final, SIEMPRE en el orden del CRF original (orden_registro)."""
     dic = diccionario()
     cols = []
-    for d in dic["campos"] + dic["locales"]:
+    def orden(d):
+        try:
+            return float(d.get("orden_registro") or 1e6)
+        except (TypeError, ValueError):
+            return 1e6
+    for d in sorted(dic["campos"] + dic["locales"], key=orden):
         exp = str(d.get("exportar_al_registro") or "")
         es_local = exp.lower().startswith("solo local")
         if exp.lower() == "no" or es_local != solo_local:
@@ -338,8 +344,7 @@ def crear_xlsx(hojas):
 def filas_exportacion(solo_local=False, solo_validados=False):
     cols = columnas_exportacion(solo_local)
     if not solo_local:
-        cols = [c for c in cols if c not in ("site_id", "patient_id", "authored_at")]
-        cab = ["site_id", "patient_id", "authored_at"] + cols
+        cab = cols  # exactamente las columnas del CRF original, en su orden
     else:
         cab = ["patient_id"] + cols
     filas = [cab]
@@ -359,10 +364,10 @@ def filas_exportacion(solo_local=False, solo_validados=False):
                     v[cod] = 1 if G == g else 0
                 if g != "OTRO":
                     v.pop("other_disease", None)
-            if solo_local:
-                fila = [r["numero"]]
-            else:
-                fila = [SITE_ID, r["numero"], r["creado"]]
+            fila = [r["numero"]] if solo_local else []
+            v.setdefault("site_id", SITE_ID)
+            v["site_id"], v["patient_id"] = SITE_ID, r["numero"]
+            v.setdefault("authored_at", r["creado"])
             for c in cols:
                 if g and not aplica_a(campo.get(c), g):
                     fila.append("")

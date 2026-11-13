@@ -620,3 +620,8 @@ textarea.inp { width: 100%; height: auto; min-height: 76px; padding: 10px 12px; 
 .otro-diag .inp { width: 100%; }
 .diags-celda { display: flex; flex-wrap: wrap; gap: 4px; }
 .selector-modal .opciones { gap: 8px; }
+
+/* Códigos de variable largos: se recortan con "…" (el código completo aparece al pasar el ratón) */
+.campo .lab { min-width: 0; }
+.campo .lab > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.campo .lab .cod { flex-shrink: 1; min-width: 0; max-width: 48%; overflow: hidden; text-overflow: ellipsis; }
