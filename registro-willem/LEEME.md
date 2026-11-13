@@ -31,6 +31,9 @@ La carpeta `web/` también puede publicarse tal cual en GitHub Pages (funciona e
 - Formato: Sí = 1, No = 0, Desconocido/Duda = vacío. Columnas de fecha de un Sí/No: la fecha, 0 si se contestó
   sin fecha, vacío si es Desconocido o no se contestó.
 - La carpeta compartida (Excel por persona + "Unir casos") sigue funcionando como copia de seguridad.
+- **Contraseña de acceso** (versión web y `WILLEM.html`): la conoce el equipo; en el código solo hay una huella
+  cifrada. Para cambiarla: `python3 herramientas/cambiar_clave.py`, luego `python3 herramientas/construir_web.py`
+  y subir los cambios. Es una barrera ligera: los datos están protegidos por las cuentas y permisos del SMS.
 
 ## Opción con servidor (base de datos común en un PC)
 

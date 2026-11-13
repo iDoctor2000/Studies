@@ -5,6 +5,7 @@ import { construirModelo, pestanasDelCaso, progresoPestana, progresoCaso, progre
 import { anonimizar, extraer, EJEMPLO } from "./importador.js";
 import * as L from "./local.js";
 import * as ENV from "./envio.js";
+import { comprobarClave, accesoConcedido, recordarAcceso } from "./acceso.js";
 
 // ===========================================================================
 //  Utilidades
@@ -106,6 +107,8 @@ async function arrancar() {
   aplicarTema();
   S.modo = await detectarModo();
   document.body.dataset.modo = S.modo;
+  // Versión web (sin servidor): contraseña común del equipo antes de entrar
+  if (navegador() && !accesoConcedido()) await pedirClave();
   try {
     S.info = await api("GET", "estado");
   } catch (e) {
@@ -201,6 +204,32 @@ function heroe() {
       </div>
     </div>
   </div>`;
+}
+
+function pedirClave() {
+  return new Promise((resolver) => {
+    $("#raiz").innerHTML = `<div class="login">${heroe()}
+      <div class="lado"><form class="caja form" id="fClave" autocomplete="off">
+        <div><h2>Acceso restringido</h2><div class="sub">Escriba la contraseña del equipo del estudio.</div></div>
+        <label>Contraseña<input class="inp" type="password" name="clave" required autofocus autocomplete="current-password"></label>
+        <label style="flex-direction:row;align-items:center;gap:8px;font-weight:500"><input type="checkbox" name="recordar" checked> Recordar en este dispositivo</label>
+        <div class="error" id="errClave"></div>
+        <button class="btn primario grande" style="justify-content:center">${icono("candado")} Entrar</button>
+      </form></div></div>`;
+    const f = $("#fClave");
+    let fallos = 0;
+    f.onsubmit = async (ev) => {
+      ev.preventDefault();
+      const b = f.querySelector("button"); b.disabled = true;
+      const ok = await comprobarClave(f.clave.value).catch(() => false);
+      b.disabled = false;
+      if (ok) { recordarAcceso(f.recordar.checked); return resolver(); }
+      fallos++;
+      $("#errClave").textContent = "Contraseña incorrecta";
+      f.clave.value = ""; f.clave.focus();
+      if (fallos >= 3) { b.disabled = true; setTimeout(() => (b.disabled = false), 3000 * fallos); }
+    };
+  });
 }
 
 function pintarLogin() {
