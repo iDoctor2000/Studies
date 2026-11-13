@@ -216,6 +216,12 @@ def iniciar_db():
             campo TEXT, antes TEXT, despues TEXT, origen TEXT);
         CREATE INDEX IF NOT EXISTS idx_aud_num ON auditoria(numero);
         """)
+        # Fase 2 (IA local): propuestas de la IA y textos anonimizados de los informes
+        cols = [r[1] for r in con.execute("PRAGMA table_info(casos)")]
+        if "ia" not in cols:
+            con.execute("ALTER TABLE casos ADD COLUMN ia TEXT NOT NULL DEFAULT '{}'")
+        if "informes" not in cols:
+            con.execute("ALTER TABLE casos ADD COLUMN informes TEXT NOT NULL DEFAULT '[]'")
 
 
 def llave_db():
@@ -246,14 +252,108 @@ def comprobar_pw(pw, guardado):
     return hmac.compare_digest(hash_pw(pw, sal), guardado)
 
 
-def caso_a_dict(r, con_valores=True):
+def caso_a_dict(r, con_valores=True, con_informes=False):
     d = {"numero": r["numero"], "principal": r["principal"],
          "secundarias": json.loads(r["secundarias"]), "estado": r["estado"],
          "creado": r["creado"], "creado_por": r["creado_por"],
-         "modificado": r["modificado"], "modificado_por": r["modificado_por"]}
+         "modificado": r["modificado"], "modificado_por": r["modificado_por"],
+         "ia": json.loads(r["ia"] or "{}")}
     if con_valores:
         d["valores"] = json.loads(r["valores"])
+    if con_informes:
+        d["informes"] = json.loads(r["informes"] or "[]")
     return d
+
+
+# ===========================================================================
+#  Propuestas de la IA local (misma lógica que web/js/ia.js)
+# ===========================================================================
+def _tiene_valor(x):
+    return x is not None and x != ""
+
+
+def ia_pendientes(ia, valores):
+    return [k for k, m in ia.items() if not m.get("revisado")
+            and (k == "_diagnosticos" or any(_tiene_valor(valores.get(c)) for c in m.get("codigos", [])))]
+
+
+def marcar_por_campos(ia, campos):
+    campos, out = set(campos), []
+    for k, m in ia.items():
+        if not m.get("revisado") and campos & set(m.get("codigos", [])):
+            m["revisado"] = True
+            out.append(k)
+    return out
+
+
+def aplicar_propuesta(con, p, usuario):
+    """Aplica una propuesta de la IA (crea el caso si no existe). Nunca pisa lo escrito por una persona."""
+    if not isinstance(p, dict) or p.get("formato") != "willem-propuesta-ia/1":
+        return {"accion": "omitido", "motivo": "No es un archivo de propuestas de la IA"}
+    num = int(p.get("numero_caso") or 0)
+    if num <= 0:
+        return {"accion": "omitido", "motivo": "Número de caso no válido"}
+    r = con.execute("SELECT * FROM casos WHERE numero=?", (num,)).fetchone()
+    if r and r["estado"] == "validado":
+        return {"numero": num, "accion": "omitido", "motivo": "El caso ya está validado"}
+    t = ahora()
+    auditoria = []
+    if r:
+        accion, valores = "actualizado", json.loads(r["valores"])
+        principal, sec = r["principal"], json.loads(r["secundarias"])
+        ia, informes = json.loads(r["ia"] or "{}"), json.loads(r["informes"] or "[]")
+    else:
+        accion = "creado"
+        diags = [d.get("codigo") for d in p.get("diagnosticos") or [] if d.get("codigo") in GRUPOS_PRINCIPALES]
+        principal, sec = (diags[0] if diags else "OTRO"), diags[1:]
+        valores = {"site_id": SITE_ID, "patient_id": num, "authored_at": t}
+        valores.update(diagnosticos(principal, sec))
+        if "OTRO" in [principal, *sec]:
+            otro = next((d for d in p.get("diagnosticos") or [] if d.get("codigo") == "OTRO"), {})
+            valores["other_disease"] = (otro.get("texto") or "").strip() or "Pendiente de revisar (propuesto por la IA)"
+        avisos = ([] if diags else ["La IA no ha identificado ningún diagnóstico del estudio"]) + \
+            [d.get("aviso") for d in p.get("diagnosticos") or [] if d.get("aviso")]
+        ia = {"_diagnosticos": {"valor_texto": ", ".join(diags or ["OTRO"]), "origen": "ia", "revisado": False,
+                                "cita": "\n".join(f"{d.get('codigo')}: {d.get('cita')}" for d in p.get("diagnosticos") or []),
+                                "aviso": "; ".join(avisos), "codigos": ["_diagnosticos"]}}
+        informes = []
+        auditoria.append(("(caso creado)", None, principal))
+    de_ia = {c for m in ia.values() if not m.get("revisado") for c in m.get("codigos", [])}
+    aplicados = omitidos = 0
+    for k, meta in (p.get("ia") or {}).items():
+        cods = [c for c in meta.get("codigos") or [] if re.fullmatch(r"[a-z0-9_]{1,80}", str(c))
+                and c not in ("site_id", "patient_id", "authored_at")]
+        if not cods:
+            continue
+        if any(_tiene_valor(valores.get(c)) and c not in de_ia for c in cods):
+            omitidos += 1
+            continue
+        for c in cods:
+            nuevo = (p.get("valores") or {}).get(c)
+            if valores.get(c) != nuevo:
+                auditoria.append((c, valores.get(c), nuevo))
+            if nuevo is None:
+                valores.pop(c, None)
+            else:
+                valores[c] = nuevo
+        ia[k] = {"valor_texto": str(meta.get("valor_texto") or ""), "cita": str(meta.get("cita") or ""),
+                 "aviso": str(meta.get("aviso") or ""), "origen": meta.get("origen") or "ia", "codigos": cods, "revisado": False}
+        aplicados += 1
+    for inf in p.get("informes") or []:
+        limpio = {k: inf.get(k) for k in ("fecha_ingreso", "fecha_alta", "servicio", "titulo")}
+        limpio.update(texto=str(inf.get("texto") or ""), indice=bool(inf.get("indice")))
+        informes = [x for x in informes if x.get("fecha_ingreso") != limpio["fecha_ingreso"]] + [limpio]
+    informes.sort(key=lambda x: str(x.get("fecha_ingreso")))
+    if r:
+        con.execute("UPDATE casos SET valores=?, ia=?, informes=?, modificado=?, modificado_por=? WHERE numero=?",
+                    (json.dumps(valores), json.dumps(ia), json.dumps(informes), t, usuario, num))
+    else:
+        con.execute("""INSERT INTO casos(numero,principal,secundarias,valores,creado,creado_por,modificado,modificado_por,ia,informes)
+                       VALUES(?,?,?,?,?,?,?,?,?,?)""", (num, principal, json.dumps(sec), json.dumps(valores), t, usuario, t, usuario,
+                                                          json.dumps(ia), json.dumps(informes)))
+    con.executemany("INSERT INTO auditoria(numero,usuario,fecha,campo,antes,despues,origen) VALUES(?,?,?,?,?,?,?)",
+                    [(num, usuario, t, c, None if a is None else str(a), None if d is None else str(d), "ia") for c, a, d in auditoria])
+    return {"numero": num, "accion": accion, "aplicados": aplicados, "omitidos": omitidos}
 
 
 # ===========================================================================
@@ -700,7 +800,7 @@ class Manejador(BaseHTTPRequestHandler):
                 r = con.execute("SELECT * FROM casos WHERE numero=?", (int(p[0]),)).fetchone()
                 if not r:
                     raise Error(404, "Caso no encontrado")
-                return self._json(caso_a_dict(r))
+                return self._json(caso_a_dict(r, con_informes=True))
             rows = con.execute("SELECT * FROM casos ORDER BY modificado DESC").fetchall()
         self._json([caso_a_dict(r) for r in rows])
 
@@ -734,7 +834,7 @@ class Manejador(BaseHTTPRequestHandler):
         u = self._usuario()
         num = int(p[0])
         b = self._cuerpo()
-        origen = b.get("origen") if b.get("origen") in ("formulario", "importacion", "relleno_no") else "formulario"
+        origen = b.get("origen") if b.get("origen") in ("formulario", "importacion", "relleno_no", "ia_revision") else "formulario"
         with LOCK, db() as con:
             r = con.execute("SELECT * FROM casos WHERE numero=?", (num,)).fetchone()
             if not r:
@@ -742,6 +842,7 @@ class Manejador(BaseHTTPRequestHandler):
             if r["estado"] == "validado" and u["rol"] != "dm":
                 raise Error(403, "Caso validado: solo un data manager puede modificarlo")
             valores = json.loads(r["valores"])
+            ia = json.loads(r["ia"] or "{}")
             principal, sec, estado = r["principal"], json.loads(r["secundarias"]), r["estado"]
             cambios = []
             if "principal" in b or "secundarias" in b:
@@ -768,22 +869,48 @@ class Manejador(BaseHTTPRequestHandler):
                         valores.pop(k, None)
                     else:
                         valores[k] = v
+            # Lo que una persona cambia deja de estar "pendiente de revisar" de la IA
+            revisados = marcar_por_campos(ia, [c for c, _, _ in cambios if not c.startswith("(")])
+            if any(c.startswith("(diagn") or c.startswith("(enfermedad") for c, _, _ in cambios) and "_diagnosticos" in ia \
+                    and not ia["_diagnosticos"].get("revisado"):
+                ia["_diagnosticos"]["revisado"] = True
+                revisados.append("_diagnosticos")
+            pedir = b.get("ia_revisar") or []
+            for k in (list(ia) if pedir == "*" else pedir):
+                if k in ia and not ia[k].get("revisado"):
+                    ia[k]["revisado"] = True
+                    revisados.append(k)
+            cambios += [("(IA revisado)", None, k) for k in revisados]
             if b.get("estado") in ("borrador", "completo", "validado") and b["estado"] != estado:
                 if (b["estado"] == "validado" or estado == "validado") and u["rol"] != "dm":
                     raise Error(403, "Solo un data manager puede validar")
                 if b["estado"] == "validado" and "DUDA" in valores.values():
                     raise Error(409, "No se puede validar: el caso tiene dudas sin resolver")
+                if b["estado"] == "validado" and ia_pendientes(ia, valores):
+                    raise Error(409, f"No se puede validar: quedan {len(ia_pendientes(ia, valores))} datos de la IA sin revisar")
                 cambios.append(("(estado)", estado, b["estado"]))
                 estado = b["estado"]
             if cambios:
                 t = ahora()
-                con.execute("""UPDATE casos SET principal=?, secundarias=?, valores=?, estado=?, modificado=?, modificado_por=?
-                               WHERE numero=?""", (principal, json.dumps(sec), json.dumps(valores), estado, t, u["usuario"], num))
+                con.execute("""UPDATE casos SET principal=?, secundarias=?, valores=?, estado=?, ia=?, modificado=?, modificado_por=?
+                               WHERE numero=?""", (principal, json.dumps(sec), json.dumps(valores), estado, json.dumps(ia), t, u["usuario"], num))
                 con.executemany("INSERT INTO auditoria(numero,usuario,fecha,campo,antes,despues,origen) VALUES(?,?,?,?,?,?,?)",
                                 [(num, u["usuario"], t, c, None if a is None else str(a), None if d is None else str(d), origen)
                                  for c, a, d in cambios])
             r = con.execute("SELECT * FROM casos WHERE numero=?", (num,)).fetchone()
         self._json(caso_a_dict(r))
+
+    def api_post_ia(self, p, q):
+        """Importa propuestas de la IA local (solo data managers)."""
+        u = self._usuario(rol="dm")
+        if not p or p[0] != "importar":
+            raise Error(404, "No encontrado")
+        props = self._cuerpo().get("propuestas") or []
+        if not isinstance(props, list) or len(props) > 1000:
+            raise Error(400, "Envíe una lista de propuestas (máximo 1000)")
+        with LOCK, db() as con:
+            res = [aplicar_propuesta(con, x, u["usuario"]) for x in props]
+        self._json({"resultados": res})
 
     def api_delete_casos(self, p, q):
         u = self._usuario(rol="dm")

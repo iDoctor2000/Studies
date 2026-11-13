@@ -23,7 +23,7 @@ import servidor  # noqa: E402
 import demo  # noqa: E402
 
 WEB = os.path.join(RAIZ, "web")
-MODULOS = ["xlsx", "registro", "iconos", "modelo", "importador", "local", "envio", "acceso", "app"]  # orden de dependencias
+MODULOS = ["xlsx", "registro", "iconos", "modelo", "importador", "ia", "local", "envio", "acceso", "app"]  # orden de dependencias
 
 
 def diccionario_json():

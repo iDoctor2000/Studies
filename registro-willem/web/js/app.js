@@ -6,6 +6,7 @@ import { anonimizar, extraer, EJEMPLO } from "./importador.js";
 import * as L from "./local.js";
 import * as ENV from "./envio.js";
 import { comprobarClave, accesoConcedido, recordarAcceso } from "./acceso.js";
+import { iaPendientes, marcarPorCampos, NOMBRE_ORIGEN } from "./ia.js";
 
 // ===========================================================================
 //  Utilidades
@@ -153,6 +154,7 @@ async function enrutar() {
     else if (pag === "diccionario") await pDiccionario();
     else if (pag === "dudas") await pDudas();
     else if (pag === "envio" && esDM()) await pEnvio();
+    else if (pag === "ia" && esDM()) await pIA();
     else if (pag === "carpeta" && navegador()) await pCarpeta();
     else if (pag === "unir" && navegador() && esDM()) await pUnir();
     else location.hash = "#/panel";
@@ -324,6 +326,7 @@ function pintarEstructura() {
         <a href="#/diccionario" data-pag="diccionario">${icono("libro")} Diccionario</a>
         ${dm ? `<div class="titulo">Data manager</div>
         <a href="#/llave" data-pag="llave">${icono("llave")} Libro llave</a>
+        <a href="#/ia" data-pag="ia">${icono("chispa")} Importar de la IA</a>
         ${navegador() ? `<a href="#/unir" data-pag="unir">${icono("unir")} Unir casos</a>` : ""}
         <a href="#/envio" data-pag="envio">${icono("enviar")} Envío al registro</a>
         <a href="#/exportar" data-pag="exportar">${icono("exportar")} Exportar</a>
@@ -363,7 +366,7 @@ function pintarEstructura() {
 
 async function cargarCasos() {
   S.casos = await api("GET", "casos");
-  S.casos.forEach((c) => { c.progreso = progresoCaso(S.modelo, c); c.dudas = dudasDelCaso(S.modelo, c); });
+  S.casos.forEach((c) => { c.progreso = progresoCaso(S.modelo, c); c.dudas = dudasDelCaso(S.modelo, c); c.iaPend = iaPendientes(c).length; });
   const nd = S.casos.reduce((a, c) => a + c.dudas.length, 0) + S.casos.filter(tieneNota).length;
   const elD = $("#nDudas"); if (elD) { elD.textContent = nd || ""; elD.classList.toggle("oculto", !nd); }
   const n = $("#nCasos"); if (n) n.textContent = S.casos.length;
@@ -463,10 +466,10 @@ async function pPanel() {
 async function pCasos(qs) {
   barra("Casos", "Registro WILLEM", `<a class="btn primario" href="#/nuevo">${icono("mas")} Nuevo caso</a>`);
   await cargarCasos();
-  const F = { enf: qs.get("enf") || "", estado: qs.get("estado") || "", q: "", nota: qs.get("revisar") === "1" };
+  const F = { enf: qs.get("enf") || "", estado: qs.get("estado") || "", q: "", nota: qs.get("revisar") === "1", ia: qs.get("ia") === "1" };
   const cont = $("#contenido");
   const pintar = () => {
-    const lista = S.casos.filter((c) => (!F.nota || tieneNota(c)) && (!F.enf || diagnosticosDe(c).includes(F.enf)) && (!F.estado || c.estado === F.estado) && (!F.q || pad(c.numero).includes(F.q.replace(/\D/g, "")) && F.q.replace(/\D/g, "")));
+    const lista = S.casos.filter((c) => (!F.nota || tieneNota(c)) && (!F.ia || c.iaPend) && (!F.enf || diagnosticosDe(c).includes(F.enf)) && (!F.estado || c.estado === F.estado) && (!F.q || pad(c.numero).includes(F.q.replace(/\D/g, "")) && F.q.replace(/\D/g, "")));
     const cuenta = (g) => S.casos.filter((c) => diagnosticosDe(c).includes(g)).length;
     cont.innerHTML = `
       <div class="filtros">
@@ -477,6 +480,7 @@ async function pCasos(qs) {
       <div class="filtros">
         ${[["", "Todos los estados"], ["borrador", "Borrador"], ["completo", "Completo"], ["validado", "Validado"]].map(([k, t]) => `<span class="chip ${F.estado === k ? "on" : ""}" data-estado="${k}">${t}</span>`).join("")}
         <span class="chip chip-estrella ${F.nota ? "on" : ""}" id="fNota" style="--c:#d97706">${icono("estrella")} Para revisar <span class="n">${S.casos.filter(tieneNota).length}</span></span>
+        <span class="chip ${F.ia ? "on" : ""}" id="fIA" style="--c:var(--ia)">${icono("chispa")} Datos de la IA por revisar <span class="n">${S.casos.filter((c) => c.iaPend).length}</span></span>
       </div>
       <div class="tarjeta">
         ${lista.length ? `<table class="tabla"><thead><tr><th>Caso</th><th>Diagnósticos del estudio</th><th>Completitud</th><th>Estado</th><th>Registro</th><th>Última modificación</th></tr></thead><tbody>
@@ -484,7 +488,7 @@ async function pCasos(qs) {
           <td><span class="num-caso"><small>#</small>${pad(c.numero)}</span> ${tieneNota(c) ? `<span class="estrella on" title="${esc(c.valores.nota_revision)}">${icono("estrella")}</span>` : ""}</td>
           <td><div class="diags-celda">${diagnosticosDe(c).map((g) => pillEnf(g, diagnosticosDe(c).length > 1)).join(" ")}</div></td>
           <td><div style="display:flex;align-items:center;gap:10px">${anillo(c.progreso.pct, 40, 4.5)}<span class="sub">${c.progreso.ok}/${c.progreso.tot}</span></div></td>
-          <td>${estadoPill(c.estado)} ${c.dudas.length ? `<span class="pill sec" style="--c:#d97706" title="Dudas sin resolver">${icono("bandera")} ${c.dudas.length}</span>` : ""}</td>
+          <td>${estadoPill(c.estado)} ${c.dudas.length ? `<span class="pill sec" style="--c:#d97706" title="Dudas sin resolver">${icono("bandera")} ${c.dudas.length}</span>` : ""}${c.iaPend ? ` <span class="pill sec" style="--c:var(--ia)" title="Datos propuestos por la IA sin revisar">${icono("chispa")} ${c.iaPend}</span>` : ""}</td>
           <td>${pillEnvio(c)}</td>
           <td class="quien">${relativo(c.modificado)}<small>por ${esc(c.modificado_por)}</small></td></tr>`).join("")}
         </tbody></table>` : `<div class="vacio">${icono("casos")}<p>No hay casos con estos filtros.</p><a class="btn primario" href="#/nuevo">${icono("mas")} Crear un caso</a></div>`}
@@ -492,6 +496,7 @@ async function pCasos(qs) {
     $$("[data-enf]", cont).forEach((x) => (x.onclick = () => { F.enf = x.dataset.enf; pintar(); }));
     $$("[data-estado]", cont).forEach((x) => (x.onclick = () => { F.estado = x.dataset.estado; pintar(); }));
     $("#fNota").onclick = () => { F.nota = !F.nota; pintar(); };
+    $("#fIA").onclick = () => { F.ia = !F.ia; pintar(); };
     $$("tr[data-n]", cont).forEach((x) => (x.onclick = () => (location.hash = `#/caso/${x.dataset.n}`)));
     const q = $("#q");
     q.oninput = () => { F.q = q.value; const pos = q.selectionStart; pintar(); const nq = $("#q"); nq.focus(); nq.setSelectionRange(pos, pos); };
@@ -568,7 +573,8 @@ async function pCaso(num, tabId) {
   const tabs = pestanasDelCaso(S.modelo, E.caso);
   E.tab = tabs.find((t) => t.id === tabId) ? tabId : tabs[0].id; // siempre empieza por la primera pestaña ("Diagnósticos")
   barra(`Caso #${pad(num)}`, `<a href="#/casos">Casos</a> › ${esc(diagnosticosDe(E.caso).map((g) => ENFERMEDADES[g]?.corto || g).join(" · "))}`,
-    `<button class="btn" id="bImp">${icono("importar")} Importar informe</button><button class="btn fantasma" id="bHist">${icono("historial")} Historial</button>`);
+    `${E.caso.informes?.length ? `<button class="btn" id="bInforme">${icono("libro")} Informe${E.caso.informes.length > 1 ? `s (${E.caso.informes.length})` : ""}</button>` : ""}<button class="btn" id="bImp">${icono("importar")} Importar informe</button><button class="btn fantasma" id="bHist">${icono("historial")} Historial</button>`);
+  $("#bInforme")?.addEventListener("click", () => abrirInforme());
   $("#bImp").onclick = abrirImportador;
   $("#bHist").onclick = abrirHistorial;
   pintarCaso(true);
@@ -598,6 +604,7 @@ function pintarCaso(animar = false) {
         <div class="secs">${diags.length > 1 ? diags.map((g) => `<span class="pill sec">${icono(g)} ${esc(ENFERMEDADES[g].nombre)}</span>`).join("") : ""}
           ${diags.includes("OTRO") && c.valores.other_disease ? `<span class="pill sec">${icono("OTRO")} ${esc(c.valores.other_disease)}</span>` : ""}
           ${(() => { const d = dudasDelCaso(S.modelo, c); return d.length ? `<a class="pill sec duda-pill" href="#/caso/${c.numero}/${encodeURIComponent(d[0].pestana)}" title="Ir a la primera duda">${icono("bandera")} ${d.length} duda${d.length > 1 ? "s" : ""}</a>` : ""; })()}
+          ${(() => { const n = iaPendientes(c).length; return n ? `<button class="pill sec ia-pill" id="bIAPend" title="Ir al primer dato de la IA sin revisar">${icono("chispa")} ${n} dato${n > 1 ? "s" : ""} de la IA por revisar</button>` : ""; })()}
           ${soloLectura() ? "" : `<button class="btn pequeno" id="bDiag">${icono("editar")} Diagnósticos</button>`}</div></div>
       <div class="der">
         <span class="guardado" id="guardado">${icono("check")} Guardado</span>
@@ -612,6 +619,10 @@ function pintarCaso(animar = false) {
       </div>
     </div>
     ${soloLectura() ? `<div class="banda-lectura">${icono("candado")} Caso validado por un data manager: solo lectura.</div>` : ""}
+    ${c.ia?._diagnosticos && !c.ia._diagnosticos.revisado ? `<div class="banda-ia">${icono("chispa")}<div><b>La IA propone ${c.ia._diagnosticos.valor_texto.includes(",") ? "estos diagnósticos" : "este diagnóstico"}: ${esc(diags.map((g) => ENFERMEDADES[g]?.nombre || g).join(" · "))}</b>
+      ${c.ia._diagnosticos.aviso ? `<div class="aviso-ia">${icono("aviso")} ${esc(c.ia._diagnosticos.aviso)}</div>` : ""}
+      <div class="sub">Compruébelo antes de seguir: de los diagnósticos depende qué preguntas se muestran y las filas del Excel.</div></div>
+      <div class="acc"><button class="btn pequeno" data-ia="_diagnosticos">Ver de dónde lo saca</button>${soloLectura() ? "" : `<button class="btn pequeno" id="bDiag2">${icono("editar")} Cambiar</button><button class="btn pequeno primario" id="bDiagOk">${icono("check")} Son correctos</button>`}</div></div>` : ""}
     <div class="editor ${soloLectura() ? "solo-lectura" : ""}">
       <nav class="tarjeta indice">
         ${tabs.map((t, i) => {
@@ -629,7 +640,7 @@ function pintarCaso(animar = false) {
         <div class="seccion-cab">
           <div>${tab.grupo ? pillEnf(tab.grupo) : ""}<h2 style="margin-top:${tab.grupo ? 8 : 0}px">${esc(tab.titulo)}</h2>
             <div class="sub">${pt.ok} de ${pt.tot} respondidos${tab.grupo ? " · campos específicos de esta enfermedad" : ""}</div></div>
-          <div class="der">${soloLectura() ? "" : `<button class="btn fantasma" id="bRellenarNC" title="Pone Desconocido en todas las preguntas Sí/No y listas sin contestar de esta pestaña">${icono("interrogacion")} Resto: Desconocido</button>
+          <div class="der">${!soloLectura() && iaDePestana(tab, c).length ? `<button class="btn ia" id="bConfIA" title="Da por revisados los datos propuestos por la IA que se ven en esta pestaña">${icono("chispa")} Confirmar lo de la IA (${iaDePestana(tab, c).length})</button>` : ""}${soloLectura() ? "" : `<button class="btn fantasma" id="bRellenarNC" title="Pone Desconocido en todas las preguntas Sí/No y listas sin contestar de esta pestaña">${icono("interrogacion")} Resto: Desconocido</button>
             <button class="btn" id="bRellenar" title="Pone No en todas las preguntas Sí/No y listas con opción «No» o «Ninguno» que estén sin contestar en esta pestaña">${icono("varita")} Marcar el resto como No</button>`}</div>
         </div>
         <div id="seccion">${tab.bloques.filter((b) => b.items.some((it) => visible(it, c.valores))).map((b) => `${b.grupo ? `<div class="bloque-tit bloque-enf" style="--c:${ENFERMEDADES[b.grupo].color}">${icono(b.grupo)} ${esc(b.subtitulo)}</div>`
@@ -657,6 +668,19 @@ function pintarCaso(animar = false) {
   if (foco) $(`[data-foco="${CSS.escape(foco)}"]`)?.focus();
 
   $("#bDiag")?.addEventListener("click", editarDiagnosticos);
+  $("#bDiag2")?.addEventListener("click", editarDiagnosticos);
+  $("#bDiagOk")?.addEventListener("click", () => revisarIA(["_diagnosticos"], "Diagnósticos confirmados"));
+  $("#bIAPend")?.addEventListener("click", irAPendienteIA);
+  $("[data-ia=_diagnosticos]", cont)?.addEventListener("click", () => abrirDatoIA("_diagnosticos"));
+  $("#bConfIA")?.addEventListener("click", async () => {
+    const ks = iaDePestana(tab, c);
+    const conAviso = ks.filter((k) => c.ia[k].aviso).length;
+    const ok = await modal({ titulo: "Confirmar los datos de la IA", aceptar: `Confirmar ${ks.length}`,
+      html: `<p>Se darán por revisados los <b>${ks.length}</b> datos propuestos por la IA en <b>${esc(tab.titulo)}</b>.</p>
+        ${conAviso ? `<p class="aviso-ia">${icono("aviso")} ${conAviso} de ellos tienen un aviso (fondo ámbar). Mírelos antes de confirmar.</p>` : ""}
+        <p class="sub">Confírmelo solo si los ha comprobado con el informe. Quedará anotado en el historial.</p>` });
+    if (ok) revisarIA(ks, `${ks.length} datos de la IA confirmados`);
+  });
   $("#bEnviar")?.addEventListener("click", () => enviarAlRegistro(E.caso));
   $("#selEstado").onchange = async (ev) => {
     await vaciarPendientes();
@@ -665,13 +689,16 @@ function pintarCaso(animar = false) {
     if (ev.target.value === "validado" && dudasDelCaso(S.modelo, c).length) {
       toast("No se puede validar: hay dudas sin resolver en este caso", "mal"); return pintarCaso();
     }
-    try { E.caso = await api("PUT", "casos/" + c.numero, { estado: ev.target.value }); toast("Estado: " + ev.target.selectedOptions[0].text); pintarCaso(); }
+    if (ev.target.value === "validado" && iaPendientes(c).length) {
+      toast(`No se puede validar: quedan ${iaPendientes(c).length} datos de la IA sin revisar`, "mal"); return pintarCaso();
+    }
+    try { E.caso = conInformes(await api("PUT", "casos/" + c.numero, { estado: ev.target.value })); toast("Estado: " + ev.target.selectedOptions[0].text); pintarCaso(); }
     catch (er) { toast(er.message, "mal"); pintarCaso(); }
   };
   $("#bFin")?.addEventListener("click", async () => {
     await vaciarPendientes();
     if (prog.pct < 100) toast(`Faltan ${prog.tot - prog.ok} campos por responder`, "info");
-    else if (c.estado === "borrador") { E.caso = await api("PUT", "casos/" + c.numero, { estado: "completo" }); toast("Caso marcado como completo"); }
+    else if (c.estado === "borrador") { E.caso = conInformes(await api("PUT", "casos/" + c.numero, { estado: "completo" })); toast("Caso marcado como completo"); }
     location.hash = "#/casos";
   });
   $("#bRellenarNC")?.addEventListener("click", async () => {
@@ -716,7 +743,11 @@ function campoHTML(it, v, animar) {
       default: return v[it.codigo] != null && v[it.codigo] !== "";
     }
   })();
-  const cab = `<div class="lab"><span>${esc(it.etiqueta)}${prov}</span>${cod}</div>${ayuda}`;
+  const mIA = E.caso?.ia?.[it.codigo];
+  const pendIA = mIA && !mIA.revisado && (mIA.codigos || []).some((k) => v[k] != null && v[k] !== "");
+  const chipIA = mIA && (mIA.codigos || []).some((k) => v[k] != null && v[k] !== "")
+    ? `<button class="ia-chip ${pendIA ? "pend" : ""} ${pendIA && mIA.aviso ? "aviso" : ""}" data-ia="${esc(it.codigo)}" title="${pendIA ? "Propuesto por la IA: pulse para ver de dónde lo saca" : "Dato de la IA ya revisado"}">${icono("chispa")}IA${pendIA ? "" : " ✓"}</button>` : "";
+  const cab = `<div class="lab"><span>${esc(it.etiqueta)}${prov}</span>${chipIA}${cod}</div>${ayuda}`;
   const fechaInp = (k, val) => `<input type="text" class="inp fecha" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="dd/mm/aaaa"
       data-in="${esc(k)}" data-t="fecha" data-foco="${esc(k)}" value="${esc(isoAFecha(val))}">`;
   const limpiar = (ks) => `<button class="limpiar" data-limpiar="${esc(ks.join(","))}" title="Borrar respuesta">${icono("x")}</button>`;
@@ -770,10 +801,12 @@ function campoHTML(it, v, animar) {
       ancho = true;
       ctrl = `<textarea class="inp" data-in="${esc(it.codigo)}" data-t="texto" data-foco="${esc(it.codigo)}" placeholder="Texto libre…">${esc(v[it.codigo] || "")}</textarea>`;
   }
-  return `<div class="campo ${resp ? "respondido" : ""} ${mk === DUDA ? "con-duda" : ""} ${ancho ? "ancho" : ""}" data-k="${esc(it.codigo)}"${est}>${cab}<div class="ctrl">${ctrl}</div>${aviso}</div>`;
+  return `<div class="campo ${resp ? "respondido" : ""} ${mk === DUDA ? "con-duda" : ""} ${ancho ? "ancho" : ""} ${pendIA ? "ia-pend" + (mIA.aviso ? " ia-aviso" : "") : ""}" data-k="${esc(it.codigo)}"${est}>${cab}<div class="ctrl">${ctrl}</div>${aviso}</div>`;
 }
 
 function alClicar(ev) {
+  const ia = ev.target.closest("[data-ia]");
+  if (ia) return abrirDatoIA(ia.dataset.ia);
   if (soloLectura()) return;
   const v = E.caso.valores;
   const b = ev.target.closest("button");
@@ -879,6 +912,7 @@ function aplicar(cambios, origen = "formulario") {
   for (const [k, x] of Object.entries(def)) if (!(k in cambios)) cambios[k] = x;
   if (E.origen && E.origen !== origen) vaciarPendientes();
   E.origen = origen;
+  if (E.caso.ia) marcarPorCampos(E.caso.ia, Object.keys(cambios)); // lo que toca una persona deja de estar pendiente (igual que el servidor)
   for (const [k, val] of Object.entries(cambios)) {
     if (val === null || val === undefined) delete E.caso.valores[k];
     else E.caso.valores[k] = val;
@@ -900,7 +934,7 @@ async function vaciarPendientes(keepalive = false) {
   try {
     const r = await api("PUT", "casos/" + num, cuerpo, { keepalive });
     if (E.caso?.numero === num) {
-      E.caso.estado = r.estado; E.caso.modificado = r.modificado;
+      E.caso.estado = r.estado; E.caso.modificado = r.modificado; if (r.ia) E.caso.ia = r.ia;
       // mantener valores locales con cambios aún no enviados
       E.caso.valores = { ...r.valores, ...Object.fromEntries(Object.entries(E.pend).filter(([, x]) => x !== null)) };
       for (const [k, x] of Object.entries(E.pend)) if (x === null) delete E.caso.valores[k];
@@ -944,8 +978,8 @@ async function editarDiagnosticos() {
       if (!sel.length) throw new Error("Marque al menos un diagnóstico");
       if (sel.includes("OTRO") && !otro.trim()) throw new Error("Describa el diagnóstico de 'Otros'");
       await vaciarPendientes();
-      E.caso = await api("PUT", "casos/" + c.numero, { principal: sel[0], secundarias: sel.slice(1),
-        valores: { other_disease: sel.includes("OTRO") ? otro.trim() : null } });
+      E.caso = conInformes(await api("PUT", "casos/" + c.numero, { principal: sel[0], secundarias: sel.slice(1),
+        valores: { other_disease: sel.includes("OTRO") ? otro.trim() : null } }));
       toast("Diagnósticos actualizados");
       pCaso(c.numero, E.tab);
     },
@@ -982,8 +1016,110 @@ async function abrirHistorial() {
   };
   const fmt = (x) => x == null ? "∅" : x === "1" ? "Sí" : x === "0" ? "No" : x === NC ? "Desconocido" : x === DUDA ? "Duda" : x;
   cj.cuerpo.innerHTML = aud.length ? `<ul class="historial">${aud.map((a) => `<li><div><div>${esc(fmtFecha(a.fecha))}</div><div class="cuando">${esc(a.fecha.slice(11, 16))} · ${esc(a.usuario)}</div></div>
-    <div><div><b>${esc(a.campo.startsWith("(") ? a.campo.slice(1, -1) : etq(a.campo))}</b> ${a.origen !== "formulario" ? `<span class="origen">${a.origen === "importacion" ? "informe" : "relleno No"}</span>` : ""}</div>
+    <div><div><b>${esc(a.campo.startsWith("(") ? a.campo.slice(1, -1) : etq(a.campo))}</b> ${a.origen !== "formulario" ? `<span class="origen">${{ importacion: "informe", ia: "IA", ia_revision: "revisión IA" }[a.origen] || "relleno No"}</span>` : ""}</div>
     <div class="cambio"><del>${esc(fmt(a.antes))}</del> → <ins>${esc(fmt(a.despues))}</ins></div></div></li>`).join("")}</ul>` : `<div class="vacio">Sin cambios registrados</div>`;
+}
+
+// ---------------------------------------------------------------------------
+//  DATOS PROPUESTOS POR LA IA (fase 2)
+// ---------------------------------------------------------------------------
+const conInformes = (r) => (E.caso && r && !r.informes ? { ...r, informes: E.caso.informes } : r);
+
+/** Claves de c.ia pendientes que se ven en la pestaña t. */
+function iaDePestana(t, c) {
+  const pend = new Set(iaPendientes(c));
+  return t.bloques.flatMap((b) => b.items).filter((it) => visible(it, c.valores) && pend.has(it.codigo)).map((it) => it.codigo);
+}
+
+async function revisarIA(claves, msg) {
+  await vaciarPendientes();
+  try {
+    E.caso = conInformes(await api("PUT", "casos/" + E.caso.numero, { ia_revisar: claves, origen: "ia_revision" }));
+    toast(msg);
+    pintarCaso();
+  } catch (e) { toast(e.message, "mal"); }
+}
+
+function irAPendienteIA() {
+  const c = E.caso, pend = new Set(iaPendientes(c));
+  if (pend.has("_diagnosticos")) return window.scrollTo({ top: 0, behavior: "smooth" });
+  for (const t of pestanasDelCaso(S.modelo, c)) {
+    const it = t.bloques.flatMap((b) => b.items).find((x) => visible(x, c.valores) && pend.has(x.codigo));
+    if (!it) continue;
+    E.tab = t.id;
+    history.replaceState(null, "", `#/caso/${c.numero}/${encodeURIComponent(t.id)}`);
+    pintarCaso();
+    const el = $(`.campo[data-k="${CSS.escape(it.codigo)}"]`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    el?.classList.add("destello");
+    return;
+  }
+  toast("Hay datos de la IA en campos que ahora no se muestran: confírmelos desde «Datos de la IA» o quite el dato", "info");
+}
+
+async function abrirDatoIA(k) {
+  const c = E.caso, m = c.ia?.[k];
+  if (!m) return;
+  const it = S.modelo.porCodigo[k];
+  const titulo = k === "_diagnosticos" ? "Diagnósticos del estudio" : it?.etiqueta || k;
+  const deCabecera = m.origen !== "ia";
+  const puede = !soloLectura() && !m.revisado;
+  await modal({
+    titulo: m.revisado ? "Dato de la IA (ya revisado)" : "Dato propuesto por la IA",
+    aceptar: puede ? "Es correcto" : "Cerrar", cancelar: puede ? "Cerrar" : "",
+    html: `<div class="dato-ia"><div class="q">${esc(titulo)}</div><div class="v">${icono("chispa")} ${esc(m.valor_texto || "")}</div>
+      ${m.origen !== "ia" ? `<div class="sub">Origen: ${esc(NOMBRE_ORIGEN[m.origen] || m.origen)}</div>` : ""}
+      ${m.aviso ? `<div class="aviso-ia">${icono("aviso")} ${esc(m.aviso)}</div>` : ""}
+      ${m.cita ? `<div class="sub" style="margin-top:12px">${deCabecera ? "Se basa en" : "Lo que dice el informe"}:</div><blockquote class="cita-ia">${esc(m.cita)}</blockquote>` : `<p class="sub">La IA no ha indicado la frase del informe.</p>`}
+      <div class="acc">${c.informes?.length && m.cita ? `<button class="btn pequeno" id="iaVer">${icono("libro")} Ver en el informe</button>` : ""}
+      ${puede && k !== "_diagnosticos" ? `<button class="btn pequeno peligro" id="iaQuitar">${icono("papelera")} Quitar el dato</button>` : ""}</div>
+      ${puede ? `<p class="sub">Si no es correcto, corríjalo directamente en el formulario: al cambiarlo deja de estar pendiente.</p>` : ""}</div>`,
+    alAbrir: (mm) => {
+      $("#iaVer", mm)?.addEventListener("click", () => {
+        mm.previousElementSibling?.remove(); mm.remove();
+        abrirInforme(m.cita.split("\n").map((x) => x.replace(/^[A-Z]{2,4}:\s*/, "")), puede ? k : null);
+      });
+      $("#iaQuitar", mm)?.addEventListener("click", () => {
+        mm.previousElementSibling?.remove(); mm.remove();
+        aplicar(Object.fromEntries((m.codigos || []).map((x) => [x, null])));
+        toast("Dato quitado");
+      });
+    },
+    alAceptar: async () => { if (puede) await revisarIA([k], "Dato confirmado"); },
+  });
+}
+
+/** Muestra el texto anonimizado de los informes del caso, resaltando las frases indicadas. */
+function abrirInforme(citas = [], clave = null) {
+  const infs = E.caso.informes || [];
+  if (!infs.length) return toast("Este caso no tiene informes importados", "info");
+  citas = (Array.isArray(citas) ? citas : [citas]).filter((x) => x && x.trim().length > 3);
+  const cj = cajon("Informe anonimizado", "Texto del informe tal y como lo leyó la IA (sin datos personales)", "libro");
+  if (clave) {
+    const m = E.caso.ia[clave], it = S.modelo.porCodigo[clave];
+    cj.pie.innerHTML = `<span class="sub" style="margin-right:auto">${icono("chispa")} ${esc(clave === "_diagnosticos" ? "Diagnósticos" : it?.etiqueta || clave)}: <b>${esc(m.valor_texto)}</b></span>
+      <button class="btn fantasma" data-c>Cerrar</button><button class="btn primario" data-okia>${icono("check")} Es correcto</button>`;
+    $("[data-c]", cj.pie).onclick = cj.cerrar;
+    $("[data-okia]", cj.pie).onclick = async () => { cj.cerrar(); await revisarIA([clave], "Dato confirmado"); };
+  } else cj.pie.remove();
+  const resaltar = (texto) => {
+    let h = esc(texto).replace(/\[([A-ZÁÉÍÓÚÑº ]{2,})\]/g, '<span class="marca-anon">[$1]</span>');
+    for (const ci of citas) {
+      const partes = esc(ci.trim()).split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+      try { h = h.replace(new RegExp(partes.join("\\s+"), "i"), (x) => `<mark class="cita">${x}</mark>`); } catch { /* cita rara */ }
+    }
+    return h;
+  };
+  let sel = Math.max(0, infs.findIndex((i) => citas.length && citas.some((ci) => i.texto.replace(/\s+/g, " ").toLowerCase().includes(ci.trim().replace(/\s+/g, " ").toLowerCase()))));
+  const pintar = () => {
+    const i = infs[sel];
+    cj.cuerpo.innerHTML = `${infs.length > 1 ? `<div class="opciones" style="margin-bottom:12px">${infs.map((x, n) => `<button class="op ${n === sel ? "on" : ""}" data-inf="${n}">${x.indice ? "Ingreso índice" : "Reingreso"} · ${esc(fmtFecha(x.fecha_ingreso))}</button>`).join("")}</div>` : ""}
+      <div class="sub">Ingreso ${esc(fmtFecha(i.fecha_ingreso))} · alta ${esc(fmtFecha(i.fecha_alta))}${i.servicio ? " · " + esc(i.servicio) : ""}</div>
+      <pre class="informe-txt">${resaltar(i.texto)}</pre>`;
+    $$("[data-inf]", cj.cuerpo).forEach((b) => (b.onclick = () => { sel = +b.dataset.inf; pintar(); }));
+    setTimeout(() => $("mark.cita", cj.cuerpo)?.scrollIntoView({ block: "center" }), 50);
+  };
+  pintar();
 }
 
 // ---------------------------------------------------------------------------
@@ -1126,6 +1262,65 @@ async function pLlave() {
 // ===========================================================================
 //  EXPORTAR
 // ===========================================================================
+async function pIA() {
+  barra("Importar de la IA", "Propuestas de la IA local (Mac)");
+  const cont = $("#contenido");
+  let props = [];
+  const pintar = (resultados) => {
+    const existe = (n) => S.casos.find((c) => c.numero === n);
+    cont.innerHTML = `
+      <div class="tarjeta" style="padding:22px">
+        <h2 style="margin-top:0">${icono("chispa")} Propuestas de la IA</h2>
+        <p>En el Mac, la IA local lee los informes anonimizados y deja un archivo por caso en <code>WILLEM_anonimizado/propuestas_ia</code>.
+          Elija esos archivos (o la carpeta entera) para cargarlos aquí.</p>
+        <ul class="sub">
+          <li>Si el caso no existe, se crea con los diagnósticos que propone la IA.</li>
+          <li>Si existe, solo se rellenan los campos vacíos: <b>nunca se pisa lo que haya escrito una persona</b>. Los casos validados no se tocan.</li>
+          <li>Cada dato queda marcado con ${icono("chispa")}<b>IA</b> hasta que alguien lo revisa; no se puede validar un caso con datos de la IA sin revisar.</li>
+        </ul>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+          <label class="btn primario">${icono("importar")} Elegir archivos<input type="file" id="iaArch" accept=".json,application/json" multiple hidden></label>
+          <label class="btn">${icono("casos")} Elegir carpeta<input type="file" id="iaCarp" webkitdirectory hidden></label>
+        </div>
+      </div>
+      ${props.length ? `<div class="tarjeta" style="margin-top:16px"><table class="tabla"><thead><tr><th>Caso</th><th>Diagnósticos propuestos</th><th>Informes</th><th>Datos</th><th>Con aviso</th><th>En el registro</th></tr></thead><tbody>
+        ${props.map((p) => { const c = existe(p.numero_caso); const n = Object.keys(p.ia || {}).length; const av = Object.values(p.ia || {}).filter((x) => x.aviso).length;
+          return `<tr><td><span class="num-caso"><small>#</small>${pad(p.numero_caso)}</span></td>
+          <td>${(p.diagnosticos || []).map((d) => ENFERMEDADES[d.codigo] ? pillEnf(d.codigo, true) : esc(d.codigo)).join(" ") || '<span class="sub">ninguno</span>'}</td>
+          <td>${(p.informes || []).length}</td><td>${n}</td><td>${av ? `<span class="pill sec" style="--c:#d97706">${av}</span>` : "0"}</td>
+          <td>${c ? (c.estado === "validado" ? '<span class="sub">validado: no se toca</span>' : "ya existe: se completa") : "<b>nuevo</b>"}</td></tr>`; }).join("")}
+        </tbody></table>
+        <div style="padding:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn primario grande" id="iaImportar">${icono("chispa")} Importar ${props.length} caso${props.length > 1 ? "s" : ""}</button>
+          <span class="sub">Los textos de los informes (anonimizados) se guardan con cada caso para poder revisarlos.</span></div></div>` : ""}
+      ${resultados ? `<div class="tarjeta" style="margin-top:16px;padding:16px"><h3 style="margin-top:0">Resultado</h3><ul class="lista-res">${resultados.map((r) => `<li>${r.numero ? `<a href="#/caso/${r.numero}">Caso #${pad(r.numero)}</a>` : "—"}:
+          <b>${{ creado: "creado", actualizado: "completado", omitido: "no importado" }[r.accion] || r.accion}</b>${r.aplicados ? ` · ${r.aplicados} datos` : ""}${r.omitidos ? ` · ${r.omitidos} campos ya rellenos por una persona (no se tocan)` : ""}${r.motivo ? ` · ${esc(r.motivo)}` : ""}</li>`).join("")}</ul>
+          <a class="btn" href="#/casos?ia=1">${icono("chispa")} Ver los casos con datos de la IA por revisar</a></div>` : ""}`;
+    const leer = async (files) => {
+      const nuevas = [];
+      for (const f of files) {
+        if (!/caso_\d+\.json$/i.test(f.name)) continue;
+        try { const p = JSON.parse(await f.text()); if (p.formato === "willem-propuesta-ia/1") nuevas.push(p); } catch { /* no es JSON */ }
+      }
+      if (!nuevas.length) return toast("No hay archivos de propuestas de la IA (caso_XXXX.json) en lo elegido", "mal");
+      props = nuevas.sort((a, b) => a.numero_caso - b.numero_caso);
+      pintar();
+    };
+    $("#iaArch").onchange = (ev) => leer([...ev.target.files]);
+    $("#iaCarp").onchange = (ev) => leer([...ev.target.files]);
+    $("#iaImportar")?.addEventListener("click", async () => {
+      try {
+        const r = await api("POST", "ia/importar", { propuestas: props });
+        props = [];
+        await cargarCasos();
+        toast("Propuestas importadas");
+        pintar(r.resultados);
+      } catch (e) { toast(e.message, "mal"); }
+    });
+  };
+  await cargarCasos();
+  pintar();
+}
+
 async function pExportar() {
   barra("Exportar al registro", "Data manager");
   const [casos, cols] = await Promise.all([cargarCasos(), api("GET", "columnas")]);

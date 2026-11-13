@@ -76,6 +76,14 @@ def main():
     # 4. Sin CIP autonómico
     S.informe(os.path.join(usb, "04_sin_carm.pdf"), S.paciente(nhc="100004", carm="", cip_sns="AAAAAAAAAA100004", dni="87654321X"),
               ["MOTIVO DE INGRESO:", "Disnea"], ["Fdo: Dr./Dra. Ejemplo Inventado, Rosendo"])
+    # 4b. El mismo paciente sin CARM reingresa y ahora sí trae CARM (mismo NHC)
+    S.informe(os.path.join(usb, "04b_con_carm.pdf"), S.paciente(nhc="100004", carm="CARM100000000004", cip_sns="AAAAAAAAAA100004", dni="87654321X",
+              ingreso="01/09/2025 10:00", alta="05/09/2025 10:00", acto="25-1000044"), ["MOTIVO DE INGRESO:", "Disnea"], ["Fdo: Dr./Dra. Ejemplo Inventado, Rosendo"])
+    # 4c. Sin ninguna clave (ni CARM, ni CIP, ni NHC, ni DNI)
+    S.informe(os.path.join(usb, "04c_sin_claves.pdf"), S.paciente(nhc="", carm="", cip_sns="", dni=""), ["MOTIVO DE INGRESO:", "Disnea"], ["Fdo: Dr./Dra. Ejemplo Inventado, Rosendo"])
+    # 4d. Mismo NHC que el paciente 1 pero otro CARM: no cuadra -> bloqueado
+    S.informe(os.path.join(usb, "04d_conflicto.pdf"), S.paciente(carm="CARM100000000099", cip_sns="AAAAAAAAAA100099", dni="99999999R"),
+              ["MOTIVO DE INGRESO:", "Disnea"], ["Fdo: Dr./Dra. Ejemplo Inventado, Rosendo"])
     # 5. Páginas de dos pacientes en el mismo PDF
     pa, pb = S.paciente(nhc="100005", carm="CARM100000000005"), S.paciente(nhc="100006", carm="CARM100000000006", nombre="OTRO")
     S.escribir_pdf(os.path.join(usb, "05_mezclado.pdf"), [S.cabecera(pa, 1, 2) + S.pie(pa), S.cabecera(pb, 2, 2) + S.pie(pb)])
@@ -116,12 +124,15 @@ def main():
     pdfs = buscar_pdfs([usb])
     ok(not any(os.path.basename(p).startswith("._") for p in pdfs), "se ignoran los restos '._' del Mac")
     res, llave = procesar(pdfs, priv, sal)
-    R = {r["archivo"][:2]: r for r in res}
+    R = {r["archivo"][:2]: r for r in res if r["archivo"][2] == "_"}
     ok(R["01"]["numero"] == R["02"]["numero"] == R["03"]["numero"] == 1, "mismo paciente (reingreso y copia) = mismo caso")
     ok(R["01"]["nuevo"] and not R["02"]["nuevo"], "el reingreso no crea un caso nuevo")
-    ok(R["09"]["numero"] == 2, "paciente distinto = caso nuevo")
+    ok(R["09"]["numero"] == 3, "paciente distinto = caso nuevo")
     ok(R["03"]["repetido"], "la copia se reconoce como ya procesada")
-    for k, motivo in (("04", "CIP autonómico"), ("05", "más de un paciente"), ("06", "no contiene texto"), ("07", "No se ha podido abrir")):
+    R.update({r["archivo"][:3]: r for r in res if r["archivo"][2] in "bcd"})
+    ok(R["04"]["estado"] != "bloqueado" and R["04"]["sin_carm"] and R["04"]["numero"] == 2, "sin CARM: se enlaza por NHC/DNI (caso 2)")
+    ok(R["04b"]["numero"] == 2 and not R["04b"]["nuevo"], "reingreso del paciente sin CARM, ahora con CARM: mismo caso")
+    for k, motivo in (("04c", "ni DNI"), ("04d", "no cuadra"), ("05", "más de un paciente"), ("06", "no contiene texto"), ("07", "No se ha podido abrir")):
         ok(R[k]["estado"] == "bloqueado" and any(motivo in b for b in R[k]["bloqueos"]), f"bloqueado {k}: {motivo}")
     ok(R["02"]["estado"] == "listo", "reingreso sin trampas: listo")
     ok(R["01"]["estado"] == "revisar", "informe con posibles nombres: va a revisar")
@@ -136,6 +147,7 @@ def main():
     ok("Dr. [PROFESIONAL]" in t1 and "Dra. [PROFESIONAL]" in t1, "'Dr. Hermenegildo Valcárcel' y 'Dra. Zubizarreta' sustituidos")
     ok("FEVI 38 %" in t1 and "611.2 10e3/uL" in t1 and "05/01/2025" in t1, "se conservan datos clínicos, cifras de laboratorio y fechas")
     t9 = R["09"]["texto"]
+    ok("RESUMEN PRUEBAS COMPLEMENTARIAS:" in t1, "los títulos de sección no se tocan aunque coincidan con un apellido (PRUEBAS)")
     ok("Dolores torácicos" in t9, "'Dolores torácicos' no se confunde con el nombre de la paciente")
     ok("Fuentevieja" not in t9 and "Otropueblo" not in t9, "apellido y localidad de la paciente sustituidos")
 
@@ -147,7 +159,7 @@ def main():
     T = n(compartido)
     Tc = re.sub(r"[\s.\-/]", "", T)
     prohibido = []
-    for p in (p1, p9):
+    for p in (p1, p9, S.paciente(nhc="100004", carm="CARM100000000004", cip_sns="AAAAAAAAAA100004", dni="87654321X")):
         prohibido += [p["nhc"], p["dni"], p["cip_sns"], p["carm"], p["nss"], p["acto"], p["cama"], *p["telefonos"]]
         prohibido += [w for w in re.split(r"[\s,]+", " ".join([p["nombre"], p["ap1"], p["ap2"], *p["domicilio"], p["poblacion"][0],
                                                              p["enfermera"], p["medico"]])) if len(w) >= 5 and n(w) not in {"MARIA", "DOLORES", "MURCIA", "CALLE", "AVDA."}]
@@ -161,7 +173,8 @@ def main():
     ok(not fugas, "ningún dato identificativo en la carpeta compartida" + (f" — FUGAS: {fugas}" if fugas else ""))
     ok(not [x for x in glob.glob(os.path.join(sal, "**", "*"), recursive=True) if "PRUEBAS" in x or x.endswith(".pdf")], "los nombres de archivo originales no se copian")
     listos = sorted(os.path.basename(x) for x in glob.glob(os.path.join(sal, "listos", "*.json")))
-    ok(listos == ["caso_0001_ingreso_2025-06-03.json"], f"en 'listos' solo el reingreso: {listos}")
+    ok(listos == ["caso_0001_ingreso_2025-06-03.json", "caso_0002_ingreso_2025-01-10.json", "caso_0002_ingreso_2025-09-01.json"],
+       f"en 'listos' solo los informes sin avisos: {listos}")
 
     print("\n4) Revisión: tras marcar los nombres, el informe pasa a 'listos'")
     with open(os.path.join(priv, "ocultar_tambien.txt"), "a", encoding="utf-8") as f:
@@ -179,7 +192,8 @@ def main():
 
     print("\n5) Libro llave")
     filas = llave.filas_llave()
-    ok([f[0] for f in filas] == [1, 2] and filas[0][2] == "CARM100000000001" and filas[0][3] == "100001", "llave: 2 pacientes con CARM y NHC")
+    ok([f[0] for f in filas] == [1, 2, 3] and filas[0][2] == "CARM100000000001" and filas[0][3] == "100001", "llave: 3 pacientes con CARM y NHC")
+    ok(filas[1][2] == "CARM100000000004" and filas[1][7] == "87654321X", "el CARM que faltaba se completa al reingresar; DNI guardado")
     prof = llave.profesionales()
     ok("Zubizarreta Montesclaros, Eulalia" in prof and "LUCRECIA ZARZALEJO OYAMBRE" in prof, "directorio de profesionales")
     from servidor import crear_xlsx, leer_xlsx

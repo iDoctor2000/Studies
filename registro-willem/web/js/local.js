@@ -7,6 +7,7 @@
 // con la cuenta corporativa de cada persona.
 import { crearXlsx, leerXlsx, descargar } from "./xlsx.js";
 import { SITE_ID, MARCAS, cabeceraRegistro, valorador, filasDelCaso } from "./registro.js";
+import { aplicarPropuesta, iaPendientes, marcarPorCampos } from "./ia.js";
 
 const PRINCIPALES = ["ISQ", "IC", "EAO", "MCH", "QTL", "ATTR", "IAM", "HTA", "OTRO"]; // diagnósticos del estudio
 const TODOS = PRINCIPALES;
@@ -136,7 +137,7 @@ export async function apiLocal(metodo, url, b) {
     const c = await uno("casos", +id);
     if (!c) err("Caso no encontrado");
     if (c.estado === "validado" && yo.rol !== "dm") err("Caso validado: solo un data manager puede modificarlo");
-    const origen = ["formulario", "importacion", "relleno_no"].includes(b.origen) ? b.origen : "formulario";
+    const origen = ["formulario", "importacion", "relleno_no", "ia_revision"].includes(b.origen) ? b.origen : "formulario";
     const cambios = [];
     const valores = { ...c.valores };
     if ("principal" in b || "secundarias" in b) {
@@ -154,9 +155,17 @@ export async function apiLocal(metodo, url, b) {
       if (v === "") v = null;
       if ((valores[k] ?? null) !== v) { cambios.push([k, valores[k] ?? null, v]); if (v === null) delete valores[k]; else valores[k] = v; }
     }
+    // Lo que una persona cambia deja de estar "pendiente de revisar" de la IA
+    c.ia = c.ia || {};
+    const revisados = marcarPorCampos(c.ia, cambios.map(([k]) => k).filter((k) => !k.startsWith("(")));
+    if (cambios.some(([k]) => /^\((diagn|enfermedad)/.test(k)) && c.ia._diagnosticos && !c.ia._diagnosticos.revisado) { c.ia._diagnosticos.revisado = true; revisados.push("_diagnosticos"); }
+    for (const k of b.ia_revisar === "*" ? Object.keys(c.ia) : b.ia_revisar || []) if (c.ia[k] && !c.ia[k].revisado) { c.ia[k].revisado = true; revisados.push(k); }
+    revisados.forEach((k) => cambios.push(["(IA revisado)", null, k]));
     if (b.estado && b.estado !== c.estado && ["borrador", "completo", "validado"].includes(b.estado)) {
       if ((b.estado === "validado" || c.estado === "validado") && yo.rol !== "dm") err("Solo un data manager puede validar");
       if (b.estado === "validado" && Object.values(valores).includes("DUDA")) err("No se puede validar: el caso tiene dudas sin resolver");
+      const pend = iaPendientes({ ia: c.ia, valores });
+      if (b.estado === "validado" && pend.length) err(`No se puede validar: quedan ${pend.length} datos de la IA sin revisar`);
       cambios.push(["(estado)", c.estado, b.estado]); c.estado = b.estado;
     }
     if (cambios.length) {
@@ -167,6 +176,23 @@ export async function apiLocal(metodo, url, b) {
       programarGuardado();
     }
     return c;
+  }
+  if (R === "POST ia" && id === "importar") {
+    if (yo.rol !== "dm") err("Solo los data managers pueden hacer esto");
+    const resultados = [];
+    for (const p of b.propuestas || []) {
+      const num = parseInt(p?.numero_caso, 10);
+      const previo = num > 0 ? await uno("casos", num) : null;
+      const t = ahora();
+      const r = aplicarPropuesta(previo, p, { principales: PRINCIPALES, diagnosticos, siteId: SITE_ID, usuario: yo.usuario, ahora: t });
+      if (r.caso) {
+        await poner("casos", r.caso);
+        await auditar(r.auditoria.map(([campo, a, d]) => ({ numero: num, usuario: yo.usuario, fecha: t, campo, antes: a == null ? null : String(a), despues: d == null ? null : String(d), origen: "ia" })));
+      }
+      resultados.push({ numero: num || null, accion: r.accion, aplicados: r.aplicados || 0, omitidos: r.omitidos || 0, motivo: r.motivo || "" });
+    }
+    programarGuardado();
+    return { resultados };
   }
   if (R === "DELETE casos") {
     if (yo.rol !== "dm") err("Solo los data managers pueden hacer esto");

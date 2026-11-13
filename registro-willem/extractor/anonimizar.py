@@ -218,7 +218,7 @@ class Anonimizador:
     @staticmethod
     def _con_mayuscula(m):
         s = m.group(0).strip()
-        return bool(s) and s[0].isupper()
+        return bool(s) and s[0].isupper() and not en_titulo_seccion(m)
 
     def anonimizar(self, texto):
         t = RE_HUELLA_GLOBAL.sub("", texto)
@@ -292,6 +292,8 @@ class Anonimizador:
                 bloqueos.append("Sigue apareciendo el nombre del paciente.")
         for s in sueltas:
             for m in re.finditer(patron_texto(s), texto):
+                if en_titulo_seccion(m):
+                    continue
                 if norm(s) in PALABRAS_CORRIENTES or not m.group(0)[0].isupper():
                     avisos.append(("Palabra que coincide con un nombre o apellido del paciente", _contexto(texto, m)))
                 else:
@@ -331,6 +333,15 @@ class Anonimizador:
                 vistos.add(a)
                 self.avisos.append(a)
         return self.bloqueos, self.avisos
+
+
+def en_titulo_seccion(m):
+    """¿La coincidencia está dentro de un título de sección ("RESUMEN PRUEBAS COMPLEMENTARIAS:")?"""
+    ini = m.string.rfind("\n", 0, m.start()) + 1
+    fin = m.string.find("\n", m.end())
+    linea = m.string[ini:fin if fin >= 0 else len(m.string)]
+    t = re.match(r"^\s*([^:]+?)\s*:", linea)
+    return bool(t) and norm(t.group(1)) in SECCIONES and m.end() <= ini + t.end()
 
 
 def _contexto(texto, m, ancho=45):

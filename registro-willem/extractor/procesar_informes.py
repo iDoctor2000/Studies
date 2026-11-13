@@ -127,8 +127,9 @@ def procesar(pdfs, privado, salida, usuario="extractor"):
             r["repetido"] = llave.informe(h) is not None
             inf = leer_informe(ruta)
             c = inf["cabecera"]
-            numero, nuevo = llave.caso_para(c["cip_carm"], c["cip_sns"], c["nhc"], usuario)
-            r.update(numero=numero, nuevo=nuevo, fecha_ingreso=c["fecha_ingreso"], fecha_alta=c["fecha_alta"],
+            carm = c["cip_carm"] if c["cip_carm"].startswith("CARM") else ""
+            numero, nuevo, clave = llave.caso_para(carm, c["cip_sns"], c["nhc"], c["dni"], usuario)
+            r.update(numero=numero, nuevo=nuevo, sin_carm=not carm, clave=clave, fecha_ingreso=c["fecha_ingreso"], fecha_alta=c["fecha_alta"],
                      paginas=inf["paginas"])
             # Los profesionales de este informe se ocultarán también en los siguientes
             llave.anotar_profesionales(inf["firma"]["nombres"] + [inf["pie"]["enfermera"], inf["pie"]["medico"]])
@@ -202,6 +203,8 @@ def informe_html(resultados, avisos_equipo, privado, salida):
                        for m, c in r["avisos"])
         caso = (f"Caso <b>{r['numero']}</b> " + ('<span class="chip verde">paciente nuevo</span>' if r["nuevo"]
                 else '<span class="chip azul">ya estaba en la llave (reingreso o repetido)</span>')) if r["numero"] else "Sin caso"
+        if r.get("sin_carm"):
+            caso += ' <span class="chip ambar">sin CIP autonómico: enlazado por NHC/DNI</span>'
         fechas = f" · ingreso {r.get('fecha_ingreso') or '?'} · alta {r.get('fecha_alta') or '?'}" if r["numero"] else ""
         texto = (f"<details><summary>Ver el texto anonimizado</summary><pre>{_resaltar(r['texto'])}</pre></details>"
                  if r["texto"] and r["estado"] != "bloqueado" else "")
@@ -233,7 +236,7 @@ h1{{font-size:22px;margin:0 0 4px}} .sub{{color:var(--suave);margin:0 0 18px}}
 .estado{{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:99px;background:var(--verde);color:#fff}}
 .revisar .estado{{background:var(--ambar)}} .bloqueado .estado{{background:var(--rojo)}}
 .meta{{color:var(--suave);margin:6px 0}} .chips{{display:flex;flex-wrap:wrap;gap:6px}}
-.chip{{font-size:12px;border:1px solid var(--borde);border-radius:99px;padding:1px 8px}} .chip.verde{{color:var(--verde)}} .chip.azul{{color:var(--azul)}} .chip.gris{{color:var(--suave)}}
+.chip{{font-size:12px;border:1px solid var(--borde);border-radius:99px;padding:1px 8px}} .chip.verde{{color:var(--verde)}} .chip.azul{{color:var(--azul)}} .chip.gris{{color:var(--suave)}} .chip.ambar{{color:var(--ambar)}}
 .caja{{border-radius:10px;padding:10px 12px;margin:10px 0}} .caja ul{{margin:6px 0 0;padding-left:18px}}
 .caja.roja{{background:color-mix(in srgb,var(--rojo) 12%,transparent)}} .caja.ambar{{background:color-mix(in srgb,var(--ambar) 14%,transparent)}}
 .ctx{{color:var(--suave);font-size:13px}} mark{{background:#ffd54a;color:#000;border-radius:3px;padding:0 2px}}
@@ -314,7 +317,7 @@ def exportar_llave(llave, privado):
     from servidor import crear_xlsx
     ruta = os.path.join(privado, f"LLAVE_WILLEM_NO_COMPARTIR_{dt.date.today().isoformat()}.xlsx")
     with open(ruta, "wb") as f:
-        f.write(crear_xlsx([("LLAVE", [["numero", "cip", "carm", "nhc", "notas", "creado", "creado_por"]] + llave.filas_llave())]))
+        f.write(crear_xlsx([("LLAVE", [["numero", "cip", "carm", "nhc", "notas", "creado", "creado_por", "dni"]] + llave.filas_llave())]))
     print(f"Libro llave exportado: {ruta}")
 
 

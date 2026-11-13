@@ -32,6 +32,7 @@
   --r-2: 16px;
   --r-3: 22px;
   --c: var(--brand);
+  --ia: #7c5cf0;
   --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
   --mono: "Cascadia Code", Consolas, "SFMono-Regular", Menlo, monospace;
   color-scheme: light;
@@ -638,3 +639,33 @@ textarea.inp { width: 100%; height: auto; min-height: 76px; padding: 10px 12px; 
 .texto-nota { white-space: pre-wrap; max-width: 560px; }
 .rellenar-abajo { display: flex; justify-content: center; margin-top: 22px; }
 .rellenar-abajo .btn { border-style: dashed; }
+
+/* ===== Datos propuestos por la IA (fase 2) ===== */
+.ia-chip { display: inline-flex; align-items: center; gap: 3px; flex: none; border: 1px solid color-mix(in srgb, var(--ia) 40%, transparent); background: color-mix(in srgb, var(--ia) 10%, transparent);
+  color: var(--ia); font: 700 11px/1 var(--font); padding: 3px 7px 3px 5px; border-radius: 99px; cursor: pointer; letter-spacing: .02em; }
+.ia-chip svg { width: 13px; height: 13px; }
+.ia-chip:not(.pend) { opacity: .6; font-weight: 600; }
+.ia-chip.pend { background: var(--ia); color: #fff; border-color: transparent; box-shadow: 0 3px 10px -4px var(--ia); }
+.ia-chip.aviso { background: #d97706; box-shadow: 0 3px 10px -4px #d97706; }
+.campo.ia-pend { border-color: color-mix(in srgb, var(--ia) 45%, var(--line)); background: linear-gradient(90deg, color-mix(in srgb, var(--ia) 7%, transparent), transparent 55%), var(--surface); }
+.campo.ia-pend.ia-aviso { border-color: color-mix(in srgb, #d97706 55%, var(--line)); background: linear-gradient(90deg, color-mix(in srgb, #d97706 9%, transparent), transparent 55%), var(--surface); }
+.campo.destello { animation: destello 1.6s ease 2; }
+@keyframes destello { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ia) 30%, transparent); } }
+.ia-pill { --c: var(--ia); cursor: pointer; border: 0; font: inherit; font-size: 12px; }
+.btn.ia { color: var(--ia); border-color: color-mix(in srgb, var(--ia) 45%, var(--line)); }
+.btn.ia:hover { background: color-mix(in srgb, var(--ia) 10%, transparent); }
+.banda-ia { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; padding: 14px 16px; border-radius: 14px; margin-bottom: 14px;
+  background: color-mix(in srgb, var(--ia) 10%, var(--surface)); border: 1px solid color-mix(in srgb, var(--ia) 35%, transparent); }
+.banda-ia > svg { color: var(--ia); width: 22px; height: 22px; flex: none; margin-top: 2px; }
+.banda-ia > div:not(.acc) { flex: 1 1 260px; }
+.banda-ia .acc, .dato-ia .acc { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.aviso-ia { display: flex; gap: 6px; align-items: flex-start; color: #b45309; font-size: 13.5px; margin-top: 6px; }
+.aviso-ia svg { width: 16px; height: 16px; flex: none; margin-top: 2px; }
+.dato-ia .q { font-weight: 600; color: var(--ink-2); }
+.dato-ia .v { display: flex; align-items: center; gap: 6px; font-size: 20px; font-weight: 700; color: var(--ia); margin: 4px 0 6px; }
+.dato-ia .v svg { width: 20px; height: 20px; }
+.cita-ia { margin: 6px 0 0; padding: 10px 14px; border-left: 3px solid var(--ia); background: color-mix(in srgb, var(--ia) 8%, transparent); border-radius: 8px; white-space: pre-wrap; font-size: 14px; }
+.informe-txt { white-space: pre-wrap; word-wrap: break-word; font: 13px/1.55 var(--mono); background: var(--surface-2); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-top: 10px; }
+.informe-txt mark.cita { background: #fde047; color: #111; border-radius: 3px; padding: 1px 2px; box-shadow: 0 0 0 2px #fde047; }
+.informe-txt .marca-anon { color: var(--ia); font-weight: 700; }
+.lista-res { padding-left: 18px; line-height: 1.8; }
