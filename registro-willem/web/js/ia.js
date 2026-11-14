@@ -34,6 +34,8 @@ export function aplicarPropuesta(caso, p, { principales, diagnosticos, siteId, u
   const num = parseInt(p.numero_caso, 10);
   if (!(num > 0)) return { accion: "omitido", motivo: "Número de caso no válido" };
   if (caso?.estado === "validado") return { accion: "omitido", motivo: "El caso ya está validado" };
+  // Un caso creado a mano con el mismo número podría ser OTRO paciente: nunca se mezcla
+  if (caso && !Object.keys(caso.ia || {}).length) return { accion: "omitido", motivo: "Ya existe un caso con ese número creado a mano. Compruebe que la numeración del libro llave del Mac continúa la del registro (Estación → Ajustes → primer número)" };
   const auditoria = [];
   const t = ahora;
   let accion = "actualizado";

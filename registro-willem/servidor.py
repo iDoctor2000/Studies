@@ -296,6 +296,10 @@ def aplicar_propuesta(con, p, usuario):
     r = con.execute("SELECT * FROM casos WHERE numero=?", (num,)).fetchone()
     if r and r["estado"] == "validado":
         return {"numero": num, "accion": "omitido", "motivo": "El caso ya está validado"}
+    if r and not json.loads(r["ia"] or "{}"):
+        # Un caso creado a mano con el mismo número podría ser OTRO paciente: nunca se mezcla
+        return {"numero": num, "accion": "omitido", "motivo": "Ya existe un caso con ese número creado a mano. Compruebe que la "
+                "numeración del libro llave del Mac continúa la del registro (Estación → Ajustes → primer número)"}
     t = ahora()
     auditoria = []
     if r:

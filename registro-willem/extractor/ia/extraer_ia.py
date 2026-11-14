@@ -373,6 +373,69 @@ th{{color:var(--suave);font-weight:600}} td.av{{color:var(--ambar);font-weight:7
 </main></body></html>"""
 
 
+def casos_a_procesar(salida, elegidos=None, rehacer=False):
+    """Casos con informes listos que aún no tienen propuesta (o todos con rehacer). -> [(numero, [informes])]"""
+    por_caso = {}
+    for ruta in sorted(glob.glob(os.path.join(salida, "listos", "caso_*.json"))):
+        with open(ruta, encoding="utf-8") as f:
+            d = json.load(f)
+        por_caso.setdefault(d["numero_caso"], []).append((ruta, d))
+    out = []
+    for numero in sorted(por_caso):
+        if elegidos and numero not in elegidos:
+            continue
+        prop = os.path.join(salida, "propuestas_ia", f"caso_{numero:04d}.json")
+        mas_nuevo = max(os.path.getmtime(r) for r, _ in por_caso[numero])
+        if os.path.exists(prop) and not rehacer and os.path.getmtime(prop) >= mas_nuevo:
+            continue
+        out.append((numero, [d for _, d in por_caso[numero]]))
+    return out
+
+
+def pasos(casos, n_tandas):
+    """Número de pasos (llamadas a la IA) previstos, para la barra de progreso."""
+    return sum(1 + n_tandas + (1 if len(infs) > 1 else 0) for _, infs in casos)
+
+
+def ejecutar(ia, salida, casos, progreso=print, al_caso=None):
+    """Extrae los casos indicados y guarda las propuestas. Devuelve (filas, ruta_resumen)."""
+    ext = Extraccion(ia, cargar_preguntas())
+    destino = os.path.join(salida, "propuestas_ia")
+    os.makedirs(destino, exist_ok=True)
+    filas = []
+    for numero, informes in casos:
+        progreso(f"  Caso {numero} ({len(informes)} informe(s))")
+        fila = {"numero": numero, "informes": len(informes), "diags": [], "campos": 0, "avisos": 0, "segundos": 0}
+        try:
+            prop = ext.caso(numero, informes, progreso=progreso)
+            with open(os.path.join(destino, f"caso_{numero:04d}.json"), "w", encoding="utf-8") as f:
+                json.dump(prop, f, ensure_ascii=False, indent=1)
+            fila.update(diags=[d["codigo"] for d in prop["diagnosticos"]], campos=len(prop["ia"]),
+                        avisos=sum(1 for x in prop["ia"].values() if x["aviso"]), segundos=prop["segundos"])
+            progreso(f"    → {fila['campos']} campos propuestos ({fila['avisos']} con aviso) en {fila['segundos']:.0f} s")
+        except ErrorIA as e:
+            fila["error"] = str(e)
+            progreso(f"    ✗ {e}")
+        filas.append(fila)
+        if al_caso:
+            al_caso(fila)
+    ruta_html = None
+    if filas:
+        ruta_html = os.path.join(destino, f"resumen_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
+        with open(ruta_html, "w", encoding="utf-8") as f:
+            f.write(resumen_html(filas, destino))
+    return filas, ruta_html
+
+
+def comprobar_modelo(ia):
+    """Lanza ErrorIA si la IA no está en marcha o el modelo no está instalado."""
+    instalados = ia.modelos()
+    if ia.proveedor == "ollama" and instalados and ia.modelo not in instalados and ia.modelo + ":latest" not in instalados:
+        raise ErrorIA(f"El modelo «{ia.modelo}» no está instalado en Ollama. Instalados: {', '.join(instalados)}. "
+                      f"Instálelo con:  ollama pull {ia.modelo}")
+    return instalados
+
+
 def main():
     ap = argparse.ArgumentParser(description="La IA local rellena el formulario a partir de los informes anonimizados.")
     ap.add_argument("--salida", default=SALIDA_DEF, help="carpeta WILLEM_anonimizado")
@@ -385,58 +448,21 @@ def main():
     ap.add_argument("--rehacer", action="store_true", help="volver a extraer aunque ya haya propuesta")
     ap.add_argument("--abrir", action="store_true")
     a = ap.parse_args()
-
-    ia = ClienteIA(a.url, a.modelo, a.proveedor, a.contexto)
     try:
-        instalados = ia.modelos()
+        ia = ClienteIA(a.url, a.modelo, a.proveedor, a.contexto)
+        comprobar_modelo(ia)
     except ErrorIA as e:
         sys.exit(f"\n{e}\n")
-    if a.proveedor == "ollama" and instalados and a.modelo not in instalados and a.modelo + ":latest" not in instalados:
-        sys.exit(f"\nEl modelo «{a.modelo}» no está instalado en Ollama. Instalados: {', '.join(instalados)}\n"
-                 f"Instálelo con:  ollama pull {a.modelo}\n")
-    items = cargar_preguntas()
-    ext = Extraccion(ia, items)
-    listos = os.path.join(a.salida, "listos")
-    destino = os.path.join(a.salida, "propuestas_ia")
-    os.makedirs(destino, exist_ok=True)
-    por_caso = {}
-    for ruta in sorted(glob.glob(os.path.join(listos, "caso_*.json"))):
-        with open(ruta, encoding="utf-8") as f:
-            d = json.load(f)
-        por_caso.setdefault(d["numero_caso"], []).append((ruta, d))
     elegidos = {int(x) for x in a.casos.split(",")} if a.casos else None
-    filas = []
+    casos = casos_a_procesar(a.salida, elegidos, a.rehacer)
     print(f"\nRegistro WILLEM · extracción con IA local ({a.modelo})\n")
-    for numero in sorted(por_caso):
-        if elegidos and numero not in elegidos:
-            continue
-        salida = os.path.join(destino, f"caso_{numero:04d}.json")
-        mas_nuevo = max(os.path.getmtime(r) for r, _ in por_caso[numero])
-        if os.path.exists(salida) and not a.rehacer and os.path.getmtime(salida) >= mas_nuevo:
-            print(f"  Caso {numero}: ya tiene propuesta (use --rehacer para repetirla)")
-            continue
-        print(f"  Caso {numero} ({len(por_caso[numero])} informe(s))")
-        fila = {"numero": numero, "informes": len(por_caso[numero]), "diags": [], "campos": 0, "avisos": 0, "segundos": 0}
-        try:
-            prop = ext.caso(numero, [d for _, d in por_caso[numero]])
-            with open(salida, "w", encoding="utf-8") as f:
-                json.dump(prop, f, ensure_ascii=False, indent=1)
-            fila.update(diags=[d["codigo"] for d in prop["diagnosticos"]], campos=len(prop["ia"]),
-                        avisos=sum(1 for x in prop["ia"].values() if x["aviso"]), segundos=prop["segundos"])
-            print(f"    → {fila['campos']} campos propuestos ({fila['avisos']} con aviso) en {fila['segundos']:.0f} s")
-        except ErrorIA as e:
-            fila["error"] = str(e)
-            print(f"    ✗ {e}")
-        filas.append(fila)
-    if not filas:
-        print("  No hay casos nuevos que procesar.")
+    if not casos:
+        print("  No hay casos nuevos que procesar (use --rehacer para repetir los que ya tienen propuesta).")
         return
-    ruta_html = os.path.join(destino, f"resumen_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
-    with open(ruta_html, "w", encoding="utf-8") as f:
-        f.write(resumen_html(filas, destino))
-    print(f"\nPropuestas en: {destino}\nResumen: {ruta_html}")
-    if a.abrir:
-        subprocess.run(["open", ruta_html]) if platform.system() == "Darwin" else None
+    filas, ruta_html = ejecutar(ia, a.salida, casos)
+    print(f"\nPropuestas en: {os.path.join(a.salida, 'propuestas_ia')}\nResumen: {ruta_html}")
+    if a.abrir and platform.system() == "Darwin":
+        subprocess.run(["open", ruta_html])
 
 
 if __name__ == "__main__":

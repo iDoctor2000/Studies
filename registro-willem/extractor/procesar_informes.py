@@ -109,7 +109,18 @@ def nombre_salida(numero, fecha, huella):
     return f"caso_{numero:04d}_ingreso_{fecha or 'sin_fecha_' + huella[:8]}"
 
 
-def procesar(pdfs, privado, salida, usuario="extractor"):
+def guardar_avisos(destino, r):
+    """Avisos de un informe "para revisar", en un archivo privado aparte (para resolverlos con botones)."""
+    avisos = []
+    for n, (motivo, contexto) in enumerate(r["avisos"], 1):
+        m = re.search(r"⟦(.*?)⟧", contexto)
+        avisos.append({"id": n, "motivo": motivo, "contexto": contexto, "fragmento": m.group(1) if m else "", "resuelto": None})
+    with open(destino + ".avisos.json", "w", encoding="utf-8") as f:
+        json.dump({"archivo": r["archivo"], "pdf": r["ruta"], "numero": r["numero"], "fecha_ingreso": r.get("fecha_ingreso"),
+                   "avisos": avisos}, f, ensure_ascii=False, indent=1)
+
+
+def procesar(pdfs, privado, salida, usuario="extractor", progreso=None):
     os.makedirs(privado, exist_ok=True)
     os.makedirs(os.path.join(salida, "listos"), exist_ok=True)
     pendientes = os.path.join(privado, "pendientes_de_revisar")
@@ -165,10 +176,12 @@ def procesar(pdfs, privado, salida, usuario="extractor"):
                 with open(destino + ".txt", "w", encoding="utf-8") as f:
                     f.write(f"WILLEM · caso {numero} · ingreso {c['fecha_ingreso']} · alta {c['fecha_alta']}\n"
                             f"{c['sexo']} · nacimiento {c['fecha_nacimiento']} · {c['servicio']}\n\n{an['texto']}\n")
+                if r["estado"] == "revisar":
+                    guardar_avisos(destino, r)
             # Si antes estaba en la otra carpeta (p. ej. ya revisado), se quita de allí
             for otro in (destino_listo, destino_pend):
                 if otro != destino:
-                    for ext in (".json", ".txt"):
+                    for ext in (".json", ".txt", ".avisos.json"):
                         if os.path.exists(otro + ext):
                             os.remove(otro + ext)
             llave.guardar_informe(h, numero, c["fecha_ingreso"], c["acto"], r["estado"], destino and os.path.basename(destino))
@@ -179,6 +192,14 @@ def procesar(pdfs, privado, salida, usuario="extractor"):
         print({"listo": "LISTO", "revisar": "REVISAR (avisos)", "bloqueado": "BLOQUEADO"}[r["estado"]]
               + (f" · caso {r['numero']}" if r["numero"] else ""))
         resultados.append(r)
+        if progreso:
+            progreso(i, len(pdfs), r)
+    # Resumen del último proceso (privado: lleva nombres de archivo), para la interfaz del Mac
+    with open(os.path.join(privado, "ultimo_proceso.json"), "w", encoding="utf-8") as f:
+        json.dump({"fecha": dt.datetime.now().replace(microsecond=0).isoformat(),
+                   "informes": [{k: r.get(k) for k in ("archivo", "ruta", "estado", "bloqueos", "numero", "nuevo", "repetido",
+                                                        "sin_carm", "fecha_ingreso", "sustituciones")} | {"avisos": len(r["avisos"])}
+                                for r in resultados]}, f, ensure_ascii=False, indent=1)
     return resultados, llave
 
 

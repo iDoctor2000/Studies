@@ -101,7 +101,7 @@ def main():
     S.informe(os.path.join(usb, "09_dolores.pdf"), p9,
               ["MOTIVO DE INGRESO:", "Dolores torácicos opresivos.", "", "ANTECEDENTES:",
                "La Sra. Fuentevieja refiere dolor. Doña María Dolores vive sola en Otropueblo.",
-               "Hermana Fuente", "vieja colabora en los cuidados.", "", "MOTIVO DE ALTA:", "Mejoría"],
+               "Hermana Fuente", "vieja colabora en los cuidados.", "Esposo Anselmo la acompaña.", "", "MOTIVO DE ALTA:", "Mejoría"],
               ["Fdo: Dr./Dra. Ejemplo Inventado, Rosendo", "Col. Nº.: 30999999", "Fecha: 15/01/2025"])
 
     print("\n1) Lectura de la cabecera")
@@ -141,6 +141,7 @@ def main():
     ok("Lucinda" in motivos, "aviso: nombre de un familiar (Hija Lucinda)")
     ok(R["09"]["estado"] != "bloqueado", "paciente DOLORES no bloqueado")
     ok(any("partido" in m for m, _ in R["09"]["avisos"]), "aviso: apellido partido entre dos líneas")
+    ok(any("Anselmo" in x for _, x in R["09"]["avisos"]), "aviso: «Esposo Anselmo» a principio de línea (con mayúscula)")
     t1 = R["01"]["texto"]
     for frag in ("[PACIENTE]", "[TELÉFONO]", "[DNI]", "[CORREO]", "[NHC]", "[CIP]", "[PROFESIONAL]", "[DOMICILIO]", "[LOCALIDAD]", "[CENTRO DE SALUD]"):
         ok(frag in t1, f"sustituido en el texto: {frag}")

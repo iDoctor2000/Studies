@@ -388,13 +388,13 @@ RESTOS_CABECERA = [
 PATRONES_AVISO = [
     (re.compile(r"\(([A-ZÁÉÍÓÚÑ][a-záéíóúñü]+\s*/\s*[A-ZÁÉÍÓÚÑ][a-záéíóúñü]+(?:\s*/\s*[A-ZÁÉÍÓÚÑ][a-záéíóúñü]+)*)\)"),
      "Posibles apellidos entre paréntesis"),
-    (re.compile(r"\b(?:comentad[oa]|hablad[oa]|valorad[oa]|consultad[oa]|vist[oa]|explorad[oa]|intervenid[oa]|operad[oa]|realizad[oa]|informad[oa])\s+"
-                r"(?:con|por)\s+(?:el\s+|la\s+)?(?:Dr\.?\s+|Dra\.?\s+)?([A-ZÁÉÍÓÚÑ][a-záéíóúñü]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñü]+)?)"),
+    (re.compile(r"\b(?i:comentad[oa]|hablad[oa]|valorad[oa]|consultad[oa]|vist[oa]|explorad[oa]|intervenid[oa]|operad[oa]|realizad[oa]|informad[oa])\s+"
+                r"(?i:con|por)\s+(?i:el\s+|la\s+)?(?:Dr\.?\s+|Dra\.?\s+)?([A-ZÁÉÍÓÚÑ][a-záéíóúñü]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñü]+)?)"),
      "Posible nombre de un profesional"),
-    (re.compile(r"\b(?:hij[oa]s?|espos[oa]|marido|mujer|herman[oa]s?|sobrin[oa]s?|niet[oa]s?|nuera|yerno|cuidador[a]?|familiar|vecin[oa])"
+    (re.compile(r"\b(?i:hij[oa]s?|espos[oa]|marido|mujer|herman[oa]s?|sobrin[oa]s?|niet[oa]s?|nuera|yerno|cuidador[a]?|familiar|vecin[oa])"
                 r"(?:\s+\([^)]*\))?[\s,:]+(?:llamad[oa]\s+)?([A-ZÁÉÍÓÚÑ][a-záéíóúñü]+)"),
      "Posible nombre de un familiar"),
-    (re.compile(r"\b(?:residente|adjunt[oa]|enfermer[oa]|R[1-5])\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñü]+)"),
+    (re.compile(r"\b(?:(?i:residente|adjunt[oa]|enfermer[oa])|R[1-5])\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñü]+)"),
      "Posible nombre de un profesional"),
 ]
 

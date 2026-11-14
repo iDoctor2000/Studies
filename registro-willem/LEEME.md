@@ -172,3 +172,27 @@ en este ordenador. El programa se niega a usar una IA que no esté en `localhost
   (origen «IA» y «revisión IA»).
 
 Pruebas (con una IA simulada): `python3 extractor/pruebas/probar_ia.py`.
+
+## Estación de informes (Mac): todo con botones
+
+Doble clic en **`WILLEM_Mac.command`**. Se abre en el navegador una página LOCAL con el circuito completo:
+
+1. **Informes en PDF**: «Elegir carpeta o USB».
+2. **Anonimizar**: barra de progreso, informes listos / para revisar / bloqueados (con el motivo).
+3. **Avisos**: cada posible nombre con su contexto y tres botones: «Es un nombre: ocultar»,
+   «No es un nombre» o «Visto». También se puede ocultar a mano cualquier palabra, ver el texto completo
+   o descartar el informe. Al resolverlos, el informe pasa solo a «listos».
+4. **Rellenar con IA**: progreso por tandas y tiempo restante estimado.
+5. **Pasar al registro**: pide usuario y contraseña de data manager (la contraseña no se guarda) y
+   envía las propuestas. **Nunca se completa un caso creado a mano con el mismo número**, porque
+   podría ser otro paciente.
+
+Arriba se ve si **Ollama**, **FileVault** y el **registro** están en marcha; si Ollama o el registro
+están apagados, se arrancan con un clic. Pestaña **Libro llave**: buscador por caso, CARM, NHC o
+DNI, con los datos tapados hasta pulsar «Mostrar datos», y una copia en Excel. Pestaña **Ajustes**:
+modelo de IA, dirección del registro y **primer número de caso** (si el registro ya tiene casos
+numerados a mano, empiece después del último).
+
+Seguridad: solo escucha en este Mac (127.0.0.1). Cada apertura tiene una clave aleatoria que se
+exige en cada petición, y se comprueba la cabecera Host. Deje abierta la ventana del Terminal
+mientras trabaja; al cerrarla, la estación se apaga.
