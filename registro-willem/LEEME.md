@@ -171,6 +171,15 @@ en este ordenador. El programa se niega a usar una IA que no esté en `localhost
 - **No se puede validar un caso con datos de la IA sin revisar.** Todo queda en el historial
   (origen «IA» y «revisión IA»).
 
+**Si la IA se atasca.** Un modelo local a veces entra en bucle (repite lo mismo sin acabar). El
+programa lo detecta y sigue solo:
+
+- cada respuesta tiene un tope de longitud y de tiempo (240 segundos);
+- si una tanda de preguntas falla, se repite partida en dos mitades; lo que aun así no salga se anota
+  como incidencia y el caso continúa;
+- todo queda escrito en `~/WILLEM_anonimizado/propuestas_ia/registro_ia.log` (sin datos de pacientes
+  más allá del texto ya anonimizado): qué tanda, cuánto tardó y por qué se cortó.
+
 Pruebas (con una IA simulada): `python3 extractor/pruebas/probar_ia.py`.
 
 ## Estación de informes (Mac): todo con botones
@@ -187,6 +196,10 @@ Doble clic en **`WILLEM_Mac.command`**. Se abre en el navegador una página LOCA
    envía las propuestas. **Nunca se completa un caso creado a mano con el mismo número**, porque
    podría ser otro paciente.
 
+Durante «Rellenar con IA» se ve el paso en curso y los segundos que lleva («este paso: 35 s»), para
+distinguir una espera normal de un atasco. Hay botón **Cancelar** (lo ya hecho se conserva) y, al
+acabar, un enlace al **Registro de la IA**.
+
 Arriba se ve si **Ollama**, **FileVault** y el **registro** están en marcha; si Ollama o el registro
 están apagados, se arrancan con un clic. Pestaña **Libro llave**: buscador por caso, CARM, NHC o
 DNI, con los datos tapados hasta pulsar «Mostrar datos», y una copia en Excel. Pestaña **Ajustes**:
@@ -196,6 +209,66 @@ numerados a mano, empiece después del último).
 Seguridad: solo escucha en este Mac (127.0.0.1). Cada apertura tiene una clave aleatoria que se
 exige en cada petición, y se comprueba la cabecera Host. Deje abierta la ventana del Terminal
 mientras trabaja; al cerrarla, la estación se apaga.
+
+## Modo Vintage (vista compacta de escritorio)
+
+Dentro de un caso, botón **Modo Vintage** (arriba a la derecha). Muestra el mismo formulario al
+estilo de las bases de datos clásicas: letra pequeña, varios paneles por pantalla y muchas más
+variables a la vista.
+
+- **Solo en pantallas de escritorio** (ventana de al menos 1200 píxeles de ancho). En el móvil, en
+  una tableta o con la ventana estrecha se usa siempre el modo normal.
+- Botones pequeños **NO · SÍ · ¿? · bandera** (¿? = Desconocido, bandera = Duda). Pulsar otra vez el
+  botón marcado deja la pregunta sin contestar.
+- **Teclado**, con el cursor en una pregunta: `S` Sí, `N` No, `?` Desconocido, `D` Duda; salta sola
+  a la siguiente. `Tab`, `↓` y `↑` para moverse.
+- Un punto ámbar marca lo que falta. Al dejar el ratón sobre una pregunta se ve su ayuda y su código.
+- Los datos, las reglas, el guardado automático, la revisión de la IA y el Excel final son
+  exactamente los mismos. La elección se recuerda en cada ordenador.
+
+## Auditoría de la IA (ciclos de mejora)
+
+Menú **Auditoría de la IA** (data manager). Sirve para ver, variable por variable, cuánto acierta la
+IA en la cohorte ya revisada, y para corregirla sin repetir todo el trabajo.
+
+**1. Ver dónde falla.** Para cada variable se compara lo que propuso la IA con lo que quedó después
+de la revisión humana:
+
+| Columna | Significado |
+|---|---|
+| Propuestas | casos en los que la IA dio un valor |
+| Sin revisar | aún no lo ha mirado nadie |
+| Confirmadas | la persona lo dio por bueno |
+| Corregidas | la persona cambió el valor |
+| Quitadas | la persona lo borró |
+| No lo vio | la IA no propuso nada y la persona anotó un dato positivo |
+| Acierto | confirmadas ÷ (confirmadas + corregidas + quitadas) |
+
+Las variables con más fallos salen primero. Al pulsar una se abre el detalle caso a caso: valor de la
+IA, valor final y la frase del informe. Los **diagnósticos del estudio** tienen su propia fila. Todo
+se puede bajar en Excel (hojas `Auditoria_IA` y `Detalle`).
+
+**2. Escribir una pista clínica.** En el detalle de la variable hay un cuadro «Pista clínica para la IA»:
+una frase del equipo que explica el criterio (p. ej. «La FC es la de la exploración física al
+ingreso»). Las pistas iniciales vienen del diccionario (columna `pista_IA`); las del equipo se
+guardan en el registro, con autor y fecha, y se pueden deshacer («Volver a la inicial»). También hay
+una pista para los diagnósticos (para aplicarla hay que repetir el caso entero, porque de los
+diagnósticos depende todo lo demás).
+
+**3. Repetir solo esas variables.** En la Estación del Mac:
+
+1. **Ajustes → Pistas clínicas para la IA → Actualizar** (también se descargan solas al «Pasar al registro»).
+2. En la tarjeta de la IA, **Repetir solo unas variables…**: se eligen las variables y la IA vuelve a
+   contestar únicamente esas, en todos los casos, ya con la pista. Tarda mucho menos que rehacer los
+   casos enteros.
+3. **Pasar al registro.**
+
+En el registro, lo que una persona ya confirmó, corrigió o quitó **no se toca** si la IA responde lo
+mismo que antes; si responde otra cosa, se propone de nuevo y queda pendiente de revisar. Los casos
+validados nunca cambian. Después se vuelve al paso 1 para ver si el acierto ha mejorado.
+
+Por línea de comandos: `extraer_ia.py --variables resting_heart_rate,echocardiography_lvef` y
+`--pistas archivo.json`.
 
 ## Registro central en el NAS (fase 3)
 

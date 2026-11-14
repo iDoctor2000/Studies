@@ -34,6 +34,7 @@ const P = {
   bandera: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
   interrogacion: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.6M12 17.2v.3"/>',
   chispa: '<path d="M10 3.5 11.6 8.4 16.5 10l-4.9 1.6L10 16.5l-1.6-4.9L3.5 10l4.9-1.6zM18 13l.8 2.2L21 16l-2.2.8L18 19l-.8-2.2L15 16l2.2-.8zM17.5 3l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4L15.5 5l1.4-.6z"/>',
+  lupa: '<circle cx="10.5" cy="10.5" r="6"/><path d="m20 20-5-5M8 10.5l1.8 1.8 3.2-3.4"/>',
   vintage: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M3 14.5h18M9.5 9v11M15.5 9v11"/>',
   rayo: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
   // ---- enfermedades ----

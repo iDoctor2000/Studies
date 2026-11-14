@@ -59,7 +59,7 @@ def contestar(usuario, esquema):
         elif cod == "resting_heart_rate":  # número fuera de rango y que no está en la cita
             m = re.search(r"FC:\s*\d+\s*lpm", texto)
             if m:
-                res = {"valor": 400, "cita": m.group(0)}
+                res = {"valor": int(re.search(r"\d+", m.group(0)).group(0)) if AVERIAS["fc_bien"] else 400, "cita": m.group(0)}
         elif cod == "natriuretic_peptide_nt_probnp":
             m = re.search(r"NT-proBNP:?\s*([\d.]+)", texto)
             if m:
@@ -84,7 +84,8 @@ def contestar(usuario, esquema):
 #   "bucle":   si la tanda trae ese código y más de 4 preguntas, rellena con espacios sin parar
 #   "cortada": si la tanda trae ese código y más de 2 preguntas, corta la respuesta a la mitad (tope de longitud)
 #   "lenta":   segundos de espera entre trozos (para probar «Cancelar»)
-AVERIAS = {"bucle": None, "cortada": None, "lenta": 0}
+#   "fc_bien": si es True, la frecuencia cardiaca se lee bien (simula que una pista clínica ha corregido el fallo)
+AVERIAS = {"bucle": None, "cortada": None, "lenta": 0, "fc_bien": False}
 
 
 class _Manejador(BaseHTTPRequestHandler):
@@ -104,6 +105,12 @@ class _Manejador(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/tags":
             return self._json({"models": [{"name": "simulada:1"}]})
+        if self.path.startswith("/contiene/"):  # para las pruebas: ¿se le ha preguntado algo con este texto?
+            from urllib.parse import unquote
+            t = unquote(self.path[len("/contiene/"):])
+            return self._json({"n": sum(1 for c in _Manejador.llamadas if t in c["messages"][-1]["content"])})
+        if self.path == "/ultima":  # para las pruebas: lo último que se le preguntó
+            return self._json({"usuario": _Manejador.llamadas[-1]["messages"][-1]["content"] if _Manejador.llamadas else ""})
         self.send_error(404)
 
     def _trozo(self, texto, **extra):
@@ -113,6 +120,9 @@ class _Manejador(BaseHTTPRequestHandler):
     def do_POST(self):
         import time
         b = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == "/averias":  # para las pruebas: cambiar el comportamiento en marcha
+            AVERIAS.update(b)
+            return self._json(AVERIAS)
         _Manejador.llamadas.append(b)
         usuario = b["messages"][-1]["content"]
         props = (b.get("format") or {}).get("properties", {})

@@ -259,7 +259,8 @@ function pasos() {
       estado: c.pendientes ? "atencion" : c.listos ? "listo" : "" },
     { k: "ia", color: "#7c5cf0", ic: "chispa", n: c.sin_ia, tit: "Casos para la IA",
       desc: `${plural(c.casos_listos, "caso anonimizado", "casos anonimizados")} · ${plural(c.propuestas, "con propuesta", "con propuesta")}<label class="chk"><input type="checkbox" id="rehacer" ${S.rehacer ? "checked" : ""}> repetir también los ya hechos</label>`,
-      boton: `<button class="btn ia" data-acc="ia" ${ocupado || (!c.sin_ia && !(S.rehacer && c.casos_listos)) || !e.ia.ok ? "disabled" : ""}>${icono("chispa")} Rellenar con IA</button>`,
+      boton: `<button class="btn ia" data-acc="ia" ${ocupado || (!c.sin_ia && !(S.rehacer && c.casos_listos)) || !e.ia.ok ? "disabled" : ""}>${icono("chispa")} Rellenar con IA</button>
+        ${c.propuestas ? `<button class="btn peq fantasma enlace-ia" data-acc="variables" ${ocupado || !e.ia.ok ? "disabled" : ""} title="Tras cambiar una pista clínica: repetir solo esas preguntas en los casos ya hechos">${icono("historial")} Repetir solo unas variables…</button>` : ""}`,
       estado: corriendo("ia") ? "trabajando" : c.propuestas && !c.sin_ia ? "listo" : "" },
     { k: "registro", color: "#e11d48", ic: "enviar", n: c.sin_pasar, tit: "Propuestas por pasar",
       desc: e.registro.ok ? `Destino: ${esc(e.registro.url.replace(/^https?:\/\//, ""))}${e.registro.https ? ` · ${icono("candado")} cifrado` : ""}${e.registro.doble_factor ? " · doble factor" : ""}`
@@ -372,7 +373,8 @@ function pintarTrabajo() {
   const r0 = t.resultado;
   const final = !t.activo && !t.error && r0 ? ({
     anonimizar: () => `${plural(r0.listo + r0.revisar + r0.bloqueado, "informe leído", "informes leídos")} · ${plural(r0.nuevos, "paciente nuevo", "pacientes nuevos")} en el libro llave`,
-    ia: () => (r0.estado === "cancelado" ? `Cancelado: ${plural(r0.casos, "caso terminado", "casos terminados")} (se conservan)` : `${plural(r0.campos, "dato propuesto", "datos propuestos")} en ${plural(r0.casos, "caso", "casos")}: ahora se pasan al registro para revisarlos`),
+    ia: () => (r0.variables && r0.estado !== "cancelado" ? `${plural(r0.variables, "variable repetida", "variables repetidas")} en ${plural(r0.casos, "caso", "casos")}: ${plural(r0.cambiadas, "respuesta ha cambiado", "respuestas han cambiado")}. Páselas al registro para revisarlas`
+      : r0.estado === "cancelado" ? `Cancelado: ${plural(r0.casos, "caso terminado", "casos terminados")} (se conservan)` : `${plural(r0.campos, "dato propuesto", "datos propuestos")} en ${plural(r0.casos, "caso", "casos")}: ahora se pasan al registro para revisarlos`),
     registro: () => `${plural(r0.creado, "caso creado", "casos creados")} y ${plural(r0.actualizado, "completado", "completados")} en el registro`,
   }[t.tipo] || (() => ""))() : "";
   $(".tr-msg", el).textContent = t.error || final || t.mensaje || "";
@@ -396,7 +398,7 @@ function pintarTrabajo() {
   if (!t.activo && r) {
     if (t.tipo === "anonimizar") html = `<div class="chips"><span class="chip verde"><b>${r.listo}</b> listos</span><span class="chip ambar"><b>${r.revisar}</b> para revisar</span><span class="chip rojo"><b>${r.bloqueado}</b> bloqueados</span><span class="chip"><b>${r.nuevos}</b> pacientes nuevos</span></div>
       <div class="tr-botones"><button class="btn peq" data-r="resumen">${icono("libro")} Ver el resumen</button>${r.revisar ? `<button class="btn peq ambar" data-r="avisos">${icono("bandera")} Revisar avisos</button>` : ""}</div>`;
-    if (t.tipo === "ia") html = `<div class="chips">${r.estado === "cancelado" ? `<span class="chip rojo">Cancelado</span>` : ""}<span class="chip violeta"><b>${r.casos}</b> casos</span><span class="chip violeta"><b>${r.campos}</b> datos propuestos</span><span class="chip ambar"><b>${r.avisos}</b> con aviso</span>${r.incidencias ? `<span class="chip ambar" title="Respuestas que hubo que repetir (bucle o respuesta cortada). El detalle está en el registro.">${icono("aviso")} <b>${r.incidencias}</b> repeticiones</span>` : ""}<span class="chip">${icono("reloj")} ${mmss(r.segundos)}</span></div>
+    if (t.tipo === "ia") html = `<div class="chips">${r.estado === "cancelado" ? `<span class="chip rojo">Cancelado</span>` : ""}<span class="chip violeta"><b>${r.casos}</b> casos</span>${r.variables ? `<span class="chip violeta"><b>${r.variables}</b> variables repetidas</span><span class="chip ${r.cambiadas ? "ambar" : "verde"}"><b>${r.cambiadas}</b> respuestas distintas de la vez anterior</span>` : ""}<span class="chip violeta"><b>${r.campos}</b> datos propuestos</span><span class="chip ambar"><b>${r.avisos}</b> con aviso</span>${r.incidencias ? `<span class="chip ambar" title="Respuestas que hubo que repetir (bucle o respuesta cortada). El detalle está en el registro.">${icono("aviso")} <b>${r.incidencias}</b> repeticiones</span>` : ""}<span class="chip">${icono("reloj")} ${mmss(r.segundos)}</span></div>
       ${r.errores?.length ? `<ul class="errores">${r.errores.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
       <div class="tr-botones">${r.resumen ? `<button class="btn peq" data-r="resumen">${icono("libro")} Ver el resumen</button>` : ""}<button class="btn peq fantasma" data-r="registro_ia">${icono("historial")} Registro de la IA</button></div>`;
     if (t.tipo === "registro") html = `<div class="chips"><span class="chip verde"><b>${r.creado}</b> casos creados</span><span class="chip"><b>${r.actualizado}</b> completados</span><span class="chip gris"><b>${r.omitido}</b> no importados</span></div>
@@ -425,6 +427,68 @@ function vigilar() {
   }, 600);
 }
 
+/** Pide usuario, contraseña y (si hace falta) el código del móvil del registro. Devuelve {usuario, clave, codigo} o null. */
+async function pedirCredenciales(titulo, explicacion, aceptar) {
+  let datos = null;
+  const ok = await modal({
+    titulo, aceptar,
+    html: `${explicacion}
+      <label class="campo"><span>Usuario del registro</span><input id="rUsu" autocomplete="username" value="${esc(S.estado.ajustes.usuario_registro || "")}"></label>
+      <label class="campo"><span>Contraseña</span><input id="rCla" type="password" autocomplete="current-password"></label>
+      ${S.estado.registro.doble_factor ? `<label class="campo"><span>Código de 6 cifras del móvil</span><input id="rCod" inputmode="numeric" autocomplete="one-time-code" maxlength="9" placeholder="000 000" class="cod"></label>` : ""}
+      <p class="sub">${icono("candado")} La contraseña no se guarda en ningún sitio.</p>`,
+    alAbrir: (m) => { if ($("#rUsu", m).value) setTimeout(() => $("#rCla", m).focus(), 30); },
+    alAceptar: async (m) => { datos = { usuario: $("#rUsu", m).value, clave: $("#rCla", m).value, codigo: ($("#rCod", m)?.value || "").replace(/\s/g, "") }; },
+  });
+  return ok ? datos : null;
+}
+
+async function actualizarPistas() {
+  if (!S.estado.registro.ok) return toast("El registro no está abierto", "mal");
+  const cred = await pedirCredenciales("Actualizar las pistas clínicas", `<p>Las pistas las escribe el equipo en el registro (<b>Auditoría de la IA</b>). Se descargan para que la IA de este Mac las use en la próxima extracción.</p>`, "Descargar pistas");
+  if (!cred) return;
+  try { const r = await api("POST", "pistas", cred); toast(`${plural(r.pistas, "pista del equipo descargada", "pistas del equipo descargadas")}`); await refrescar(); if (S.vista === "ajustes") pintarAjustes(); }
+  catch (e) { toast(e.message, "mal"); }
+}
+
+/** Elegir variables para repetirlas con la IA en los casos que ya tienen propuesta. */
+async function elegirVariables() {
+  let preguntas;
+  try { preguntas = await api("GET", "preguntas"); } catch (e) { toast(e.message, "mal"); return false; }
+  const sel = new Set();
+  let lanzado = false;
+  await modal({
+    titulo: "Repetir solo unas variables", aceptar: "Repetir con la IA",
+    html: `<p>Útil después de cambiar una <b>pista clínica</b>: la IA vuelve a contestar solo estas preguntas en los <b>${plural(S.estado.cuentas.propuestas, "caso que ya tiene", "casos que ya tienen")}</b> propuesta. Lo demás no se toca, y en el registro nunca se pisa lo que haya revisado una persona.</p>
+      <label class="buscar"><span>${icono("buscar")}</span><input id="vBus" placeholder="Buscar variable (FEVI, creatinina, tabaco…)"></label>
+      <div class="lista-vars" id="vLista"></div><div class="sub" id="vCuenta"></div>`,
+    alAbrir: (m) => {
+      m.classList.add("ancha");
+      const pintar = () => {
+        const q = $("#vBus", m).value.trim().toLowerCase();
+        let ant = "";
+        $("#vLista", m).innerHTML = preguntas.filter((x) => !q || (x.texto + " " + x.codigo + " " + x.bloque).toLowerCase().includes(q)).map((x) => {
+          const cab = x.pestana + " › " + x.bloque;
+          const h = cab !== ant ? `<div class="grupo-vars">${esc(cab)}</div>` : "";
+          ant = cab;
+          return `${h}<label class="var ${sel.has(x.codigo) ? "on" : ""}"><input type="checkbox" value="${esc(x.codigo)}" ${sel.has(x.codigo) ? "checked" : ""}>
+            <div><b>${esc(x.texto)}</b>${x.pista ? `<span class="pista">${x.pista_equipo ? `<i class="eq">equipo</i>` : `<i>inicial</i>`} ${esc(x.pista)}</span>` : ""}</div></label>`;
+        }).join("") || `<div class="sub" style="padding:14px">Nada coincide</div>`;
+        $("#vCuenta", m).textContent = sel.size ? `${plural(sel.size, "variable elegida", "variables elegidas")}` : "Marque las variables que quiere repetir";
+        $$("#vLista input", m).forEach((c) => (c.onchange = () => { c.checked ? sel.add(c.value) : sel.delete(c.value); c.closest(".var").classList.toggle("on", c.checked); $("#vCuenta", m).textContent = sel.size ? `${plural(sel.size, "variable elegida", "variables elegidas")}` : "Marque las variables que quiere repetir"; }));
+      };
+      $("#vBus", m).oninput = pintar;
+      pintar();
+    },
+    alAceptar: async () => {
+      if (!sel.size) throw new Error("Marque al menos una variable");
+      await api("POST", "ia", { variables: [...sel] });
+      lanzado = true;
+    },
+  });
+  return lanzado;
+}
+
 async function accion(a) {
   try {
     if (a === "elegir") {
@@ -434,21 +498,14 @@ async function accion(a) {
     }
     if (a === "avisos") return irA("avisos");
     if (a === "abrirRegistro") return arrancarRegistro();
+    if (a === "variables") { if (!(await elegirVariables())) return; }
     if (a === "certificado") return confiarCertificado();
     if (a === "anonimizar") { await api("POST", "anonimizar"); }
     if (a === "ia") { await api("POST", "ia", { rehacer: S.rehacer }); }
     if (a === "registro") {
-      const ok = await modal({
-        titulo: "Pasar al registro", aceptar: "Entrar y pasar",
-        html: `<p>Se enviarán <b>${plural(S.estado.cuentas.sin_pasar, "propuesta", "propuestas")}</b> de la IA (anonimizadas) a <b>${esc(S.estado.registro.url)}</b>.</p>
-          <label class="campo"><span>Usuario del registro (data manager)</span><input id="rUsu" autocomplete="username" value="${esc(S.estado.ajustes.usuario_registro || "")}"></label>
-          <label class="campo"><span>Contraseña</span><input id="rCla" type="password" autocomplete="current-password"></label>
-          ${S.estado.registro.doble_factor ? `<label class="campo"><span>Código de 6 cifras del móvil</span><input id="rCod" inputmode="numeric" autocomplete="one-time-code" maxlength="9" placeholder="000 000" class="cod"></label>` : ""}
-          <p class="sub">${icono("candado")} La contraseña no se guarda en ningún sitio.</p>`,
-        alAbrir: (m) => { if ($("#rUsu", m).value) setTimeout(() => $("#rCla", m).focus(), 30); },
-        alAceptar: async (m) => { await api("POST", "registro", { usuario: $("#rUsu", m).value, clave: $("#rCla", m).value, codigo: ($("#rCod", m)?.value || "").replace(/\s/g, "") }); },
-      });
-      if (!ok) return;
+      const cred = await pedirCredenciales("Pasar al registro", `<p>Se enviarán <b>${plural(S.estado.cuentas.sin_pasar, "propuesta", "propuestas")}</b> de la IA (anonimizadas) a <b>${esc(S.estado.registro.url)}</b>. De paso se descargan las pistas clínicas del equipo.</p>`, "Entrar y pasar");
+      if (!cred) return;
+      await api("POST", "registro", cred);
     }
     S.trabajo = await api("GET", "trabajo");
     pintarCircuito();
@@ -596,6 +653,11 @@ function pintarAjustes() {
           <small class="sub">Solo se puede cambiar mientras el libro llave esté vacío.</small>
         </div>
         <div class="tarjeta form">
+          <h3>${icono("chispa")} Pistas clínicas para la IA</h3>
+          <p class="sub">Criterios por variable («si pone "resto igual", se mantiene el tratamiento previo»). El equipo los escribe en el registro, en <b>Auditoría de la IA</b>; aquí solo se descargan.</p>
+          <div class="ruta"><b>${plural(e.pistas.equipo, "pista del equipo", "pistas del equipo")}</b><code>${e.pistas.fecha ? "descargadas el " + esc(new Date(e.pistas.fecha).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })) : "todavía no se han descargado: se usan las iniciales del diccionario"}</code><button class="btn peq" id="bPistas">Actualizar</button></div>
+        </div>
+        <div class="tarjeta form">
           <h3>${icono("carpeta")} Carpetas</h3>
           <div class="ruta"><b>Privada</b> (libro llave, avisos, resúmenes)<code>${esc(e.carpetas.privado)}</code><button class="btn peq" data-ab="privado">Abrir</button></div>
           <div class="ruta"><b>Anonimizada</b> (lo que se puede compartir)<code>${esc(e.carpetas.salida)}</code><button class="btn peq" data-ab="listos">Abrir</button></div>
@@ -615,6 +677,7 @@ function pintarAjustes() {
     try { await api("POST", "ajustes", d); toast("Ajustes guardados"); refrescar(); } catch (er) { toast(er.message, "mal"); }
   };
   $("#bElegir")?.addEventListener("click", async () => { await accion("elegir"); pintarAjustes(); });
+  $("#bPistas").onclick = actualizarPistas;
   $("#fNum").onsubmit = async (ev) => {
     ev.preventDefault();
     const n = parseInt(new FormData(ev.target).get("primer_numero"), 10);

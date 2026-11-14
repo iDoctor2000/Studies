@@ -795,3 +795,28 @@ kbd { font: 600 11px/1 var(--mono); padding: 2px 5px; border-radius: 5px; border
 .vx.duda { justify-content: flex-start; color: var(--warn); }
 .vx.duda .ico { width: 13px; height: 13px; flex: none; }
 .solo-lectura .vf button:not(.ia-chip), .solo-lectura .vf input, .solo-lectura .vf select { pointer-events: none; }
+
+/* ===== Auditoría de la IA ===== */
+.grid.g-aud { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.tabla-aud td, .tabla-aud th { white-space: nowrap; }
+.tabla-aud td, .tabla-aud th { padding-top: 9px; padding-bottom: 9px; }
+.tabla-aud td:first-child { min-width: 220px; max-width: 340px; }
+.tabla-aud td:first-child b { display: block; overflow: hidden; text-overflow: ellipsis; }
+.tabla-aud td small { display: block; color: var(--ink-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.tabla-aud tbody tr { cursor: pointer; }
+.tabla-aud td.ok { color: var(--ok); font-weight: 700; } .tabla-aud td.warn { color: var(--warn); font-weight: 700; }
+.tabla-aud td.bad { color: var(--bad); font-weight: 700; } .tabla-aud td.ia { color: var(--ia); font-weight: 700; }
+.tabla-aud tr.mal td:first-child { box-shadow: inset 4px 0 0 var(--bad); }
+.barra-aud { position: relative; width: 110px; height: 20px; border-radius: 6px; background: var(--bad-soft); overflow: hidden; }
+.barra-aud i { position: absolute; inset: 0 auto 0 0; background: color-mix(in srgb, var(--ok) 55%, transparent); }
+.barra-aud span { position: relative; display: block; text-align: center; font: 700 12px/20px var(--font); }
+.pista-celda { max-width: 280px; }
+.pista-celda span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-2); }
+.pista-celda .del-equipo { color: var(--ia); font-weight: 600; }
+.pista-celda .ico { width: 13px; height: 13px; }
+.tit-det { margin: 22px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3); }
+.lista-aud { list-style: none; margin: 0; padding: 0; }
+.lista-aud li { padding: 12px 0; border-top: 1px solid var(--line); }
+.cab-aud { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cambio-aud { font-size: 14px; } .cambio-aud del { color: var(--bad); } .cambio-aud ins { color: var(--ok); text-decoration: none; font-weight: 700; }
+.lista-aud .cita-ia { font-size: 13px; }

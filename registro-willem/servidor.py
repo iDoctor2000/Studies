@@ -220,6 +220,8 @@ def iniciar_db():
             campo TEXT, antes TEXT, despues TEXT, origen TEXT);
         CREATE INDEX IF NOT EXISTS idx_aud_num ON auditoria(numero);
         """)
+        # Pistas clínicas para la IA escritas por el equipo (sustituyen a las del diccionario)
+        con.execute("CREATE TABLE IF NOT EXISTS pistas_ia(codigo TEXT PRIMARY KEY, texto TEXT NOT NULL, autor TEXT, fecha TEXT)")
         # Fase 2 (IA local): propuestas de la IA y textos anonimizados de los informes
         cols = [r[1] for r in con.execute("PRAGMA table_info(casos)")]
         if "ia" not in cols:
@@ -425,6 +427,11 @@ def aplicar_propuesta(con, p, usuario):
                 and c not in ("site_id", "patient_id", "authored_at")]
         if not cods:
             continue
+        nuevos = {c: (p.get("valores") or {}).get(c) for c in cods}
+        previo = ia.get(k)
+        if previo and previo.get("revisado") and previo.get("valores_ia") == nuevos:
+            omitidos += 1  # una persona ya revisó (confirmó, corrigió o quitó) esta misma propuesta: no se repite
+            continue
         if any(_tiene_valor(valores.get(c)) and c not in de_ia for c in cods):
             omitidos += 1
             continue
@@ -437,7 +444,8 @@ def aplicar_propuesta(con, p, usuario):
             else:
                 valores[c] = nuevo
         ia[k] = {"valor_texto": str(meta.get("valor_texto") or ""), "cita": str(meta.get("cita") or ""),
-                 "aviso": str(meta.get("aviso") or ""), "origen": meta.get("origen") or "ia", "codigos": cods, "revisado": False}
+                 "aviso": str(meta.get("aviso") or ""), "origen": meta.get("origen") or "ia", "codigos": cods, "revisado": False,
+                 "valores_ia": nuevos}  # lo que propuso la IA, para la auditoría (compararlo con lo que quede al final)
         aplicados += 1
     for inf in p.get("informes") or []:
         limpio = {k: inf.get(k) for k in ("fecha_ingreso", "fecha_alta", "servicio", "titulo")}
@@ -1112,6 +1120,31 @@ class Manejador(BaseHTTPRequestHandler):
         with LOCK, db() as con:
             res = [aplicar_propuesta(con, x, u["usuario"]) for x in props]
         self._json({"resultados": res})
+
+    # ---- pistas clínicas para la IA ---------------------------------------------
+    def api_get_pistas(self, p, q):
+        self._usuario()
+        with db() as con:
+            filas = [dict(r) for r in con.execute("SELECT * FROM pistas_ia ORDER BY codigo")]
+        self._json({"pistas": {f["codigo"]: f["texto"] for f in filas}, "detalle": filas})
+
+    def api_put_pistas(self, p, q):
+        u = self._usuario(rol="dm")
+        codigo = p[0] if p else ""
+        if not re.fullmatch(r"[a-z0-9_]{1,80}", codigo):
+            raise Error(400, "Variable no válida")
+        b = self._cuerpo()
+        texto = str(b.get("texto") or "").strip()[:1500]
+        with LOCK, db() as con:
+            antes = con.execute("SELECT texto FROM pistas_ia WHERE codigo=?", (codigo,)).fetchone()
+            if b.get("restaurar"):
+                con.execute("DELETE FROM pistas_ia WHERE codigo=?", (codigo,))
+                texto = None
+            else:
+                con.execute("INSERT OR REPLACE INTO pistas_ia VALUES(?,?,?,?)", (codigo, texto, u["usuario"], ahora()))
+            con.execute("INSERT INTO auditoria(numero,usuario,fecha,campo,antes,despues,origen) VALUES(?,?,?,?,?,?,?)",
+                        (None, u["usuario"], ahora(), f"(pista IA) {codigo}", antes["texto"] if antes else None, texto, "formulario"))
+        self._json({"ok": True})
 
     def api_delete_casos(self, p, q):
         u = self._usuario(rol="dm")

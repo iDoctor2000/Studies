@@ -46,7 +46,7 @@ sys.path.insert(0, RAIZ)
 
 import revision  # noqa: E402
 from cliente import Cancelado, ClienteIA, ErrorIA  # noqa: E402
-from extraer_ia import casos_a_procesar, comprobar_modelo, ejecutar, pasos  # noqa: E402
+from extraer_ia import casos_a_procesar, casos_con_propuesta, comprobar_modelo, ejecutar, leer_pistas, pasos  # noqa: E402
 from llave import Llave  # noqa: E402
 from preguntas import cargar_preguntas, lotes, preguntables  # noqa: E402
 from procesar_informes import PRIVADO_DEF, SALIDA_DEF, avisos_del_equipo, buscar_pdfs, informe_html, procesar  # noqa: E402
@@ -131,6 +131,14 @@ def abrir_url(url, huella="", data=None, cookies=None, timeout=10, metodo=None):
         raise
 
 
+def guardar_json(ruta, datos, **kw):
+    """Escritura atómica: nunca deja el archivo a medias si otro hilo lo está leyendo."""
+    tmp = f"{ruta}.{threading.get_ident()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(datos, f, **kw)
+    os.replace(tmp, ruta)
+
+
 class Estacion:
     def __init__(self, privado, salida):
         self.privado, self.salida = os.path.abspath(privado), os.path.abspath(salida)
@@ -175,8 +183,7 @@ class Estacion:
             a["huella_registro"] = ""  # otro registro: hay que volver a confiar en su certificado
         if "huella_registro" in cambios and not re.fullmatch(r"[0-9a-f]{64}|", cambios["huella_registro"]):
             raise ValueError("Huella no válida")
-        with open(self.ruta_ajustes, "w", encoding="utf-8") as f:
-            json.dump(a, f, ensure_ascii=False, indent=1)
+        guardar_json(self.ruta_ajustes, a, ensure_ascii=False, indent=1)
         self._cache.clear()
         return a
 
@@ -279,7 +286,7 @@ class Estacion:
                 "bloqueados": [{"archivo": x["archivo"], "motivo": "; ".join(x.get("bloqueos") or [])} for x in inf if x["estado"] == "bloqueado"]}
 
     def estado(self):
-        return {"ia": self.estado_ia(), "equipo": self.estado_equipo(), "registro": self.estado_registro(),
+        return {"ia": self.estado_ia(), "equipo": self.estado_equipo(), "registro": self.estado_registro(), "pistas": self.estado_pistas(),
                 "cuentas": self.cuentas(), "entrada": self.entrada(), "ultimo": self.ultimo(), "trabajo": self.ver_trabajo(),
                 "ajustes": {k: v for k, v in self.ajustes().items()}, "carpetas": {"privado": self.privado, "salida": self.salida}}
 
@@ -357,21 +364,33 @@ class Estacion:
         self.lanzar("anonimizar", "Anonimizar informes", fn)
 
     # 2 · IA
-    def rellenar_ia(self, rehacer=False):
+    def rellenar_ia(self, rehacer=False, variables=None):
         a = self.ajustes()
         ia = ClienteIA(a["url_ia"], a["modelo"], a["proveedor"])
         comprobar_modelo(ia)
         ia.cancelar = self.cancelar
         ia.latido = lambda n, seg: self._avance(detalle=f"escribiendo la respuesta… {n} fragmentos")
         ruta_log = os.path.join(self.privado, "registro_ia.log")
-        casos = casos_a_procesar(self.salida, rehacer=rehacer)
-        if not casos:
-            raise ValueError("No hay casos nuevos para la IA (todos los informes listos ya tienen propuesta)")
-        n_tandas = len(lotes([it for it in preguntables(cargar_preguntas()) if it["pestana"] != "Seguimiento"]))
-        total = pasos(casos, n_tandas)
+        pistas = leer_pistas(self.ruta_pistas)
+        basales = [it for it in preguntables(cargar_preguntas()) if it["pestana"] != "Seguimiento"]
+        if variables:
+            validas = {it["codigo"] for it in basales}
+            variables = [v for v in variables if v in validas]
+            if not variables:
+                raise ValueError("Elija al menos una variable")
+            casos = casos_con_propuesta(self.salida)
+            if not casos:
+                raise ValueError("Todavía no hay casos con propuesta de la IA")
+            total = len(casos) * len(lotes([it for it in basales if it["codigo"] in set(variables)]))
+        else:
+            casos = casos_a_procesar(self.salida, rehacer=rehacer)
+            if not casos:
+                raise ValueError("No hay casos nuevos para la IA (todos los informes listos ya tienen propuesta)")
+            total = pasos(casos, len(lotes(basales)))
 
         def fn():
-            self._avance(0, total, f"La IA va a leer {len(casos)} caso(s)…")
+            self._avance(0, total, f"La IA va a repetir {len(variables)} variable(s) en {len(casos)} caso(s)…" if variables
+                         else f"La IA va a leer {len(casos)} caso(s)…")
             hecho = [0]
 
             def prog(texto):
@@ -380,16 +399,86 @@ class Estacion:
                     hecho[0] += 1
                     self._avance(hecho[0], total, t.rstrip("…"))
                 self._avance(linea=t)
-            filas, ruta, estado = ejecutar(ia, self.salida, casos, progreso=prog, ruta_log=ruta_log)
+            filas, ruta, estado = ejecutar(ia, self.salida, casos, progreso=prog, ruta_log=ruta_log, pistas=pistas, variables=variables)
             if estado == "ok":
                 self._avance(total, total)
             return {"resumen": ruta, "estado": estado, "registro": ruta_log, "incidencias": sum(f.get("incidencias", 0) for f in filas),
                     "casos": sum(1 for f in filas if not f.get("error")), "campos": sum(f["campos"] for f in filas),
                     "avisos": sum(f["avisos"] for f in filas), "errores": [f"Caso {f['numero']}: {f['error']}" for f in filas if f.get("error")],
-                    "segundos": round(sum(f["segundos"] for f in filas))}
-        self.lanzar("ia", "Rellenar con la IA", fn)
+                    "segundos": round(sum(f["segundos"] for f in filas)),
+                    "variables": len(variables) if variables else 0, "cambiadas": sum(f.get("cambiadas", 0) for f in filas)}
+        self.lanzar("ia", "Repetir variables con la IA" if variables else "Rellenar con la IA", fn)
 
     # 3 · pasar al registro
+    def _sesion_registro(self, usuario, clave, codigo=""):
+        """Inicia sesión en el registro (con doble factor si lo pide). Devuelve pedir(ruta, cuerpo=None)."""
+        a = self.ajustes()
+        url = a["url_registro"].rstrip("/")
+        huella = a.get("huella_registro", "")
+        galletas = http.cookiejar.CookieJar()
+        if not usuario or not clave:
+            raise ValueError("Escriba su usuario y contraseña del registro")
+
+        def pedir(ruta, cuerpo=None):
+            try:
+                datos = json.dumps(cuerpo).encode() if cuerpo is not None else None
+                with abrir_url(url + "/api/" + ruta, huella, datos, galletas, timeout=60, metodo="POST" if datos else "GET") as r:
+                    return json.loads(r.read())
+            except CertificadoNoReconocido as e:
+                raise RuntimeError("El certificado del registro no es el esperado" + (" (ha cambiado)" if e.cambiado else "")
+                                   + ": no se ha enviado nada. Revíselo en el circuito antes de seguir.")
+            except urllib.error.HTTPError as e:
+                try:
+                    msg = json.loads(e.read()).get("error")
+                except Exception:
+                    msg = None
+                raise RuntimeError(msg or f"El registro respondió con error {e.code}")
+            except urllib.error.URLError:
+                raise RuntimeError(f"No se puede conectar con el registro en {url}. ¿Está abierto?")
+        r = pedir("login", {"usuario": usuario, "clave": clave})
+        if r.get("paso") == "configurar_2fa":
+            raise RuntimeError("Antes de usar la estación, entre una vez en el registro desde el navegador para activar el doble factor")
+        if r.get("paso") == "codigo":
+            if not codigo:
+                raise RuntimeError("El registro pide el código de 6 cifras de su móvil: vuelva a intentarlo escribiéndolo")
+            pedir("login/codigo", {"desafio": r["desafio"], "codigo": codigo})
+        return pedir
+
+    # Pistas clínicas: las escribe el equipo en el registro y la estación las descarga al iniciar sesión
+    @property
+    def ruta_pistas(self):
+        return os.path.join(self.privado, "pistas_ia.json")
+
+    def _guardar_pistas(self, respuesta, url):
+        pistas = {k: str(v) for k, v in (respuesta.get("pistas") or {}).items()}
+        guardar_json(self.ruta_pistas, {"fecha": dt.datetime.now().replace(microsecond=0).isoformat(), "registro": url, "pistas": pistas},
+                     ensure_ascii=False, indent=1)
+        return len(pistas)
+
+    def estado_pistas(self):
+        try:
+            with open(self.ruta_pistas, encoding="utf-8") as f:
+                d = json.load(f)
+            return {"equipo": len(d.get("pistas") or {}), "fecha": d.get("fecha")}
+        except (OSError, ValueError):
+            return {"equipo": 0, "fecha": None}
+
+    def actualizar_pistas(self, usuario, clave, codigo=""):
+        pedir = self._sesion_registro(usuario, clave, codigo)
+        n = self._guardar_pistas(pedir("pistas"), self.ajustes()["url_registro"])
+        try:
+            pedir("logout", {})
+        except Exception:
+            pass
+        return n
+
+    def preguntas(self):
+        """Variables que contesta la IA, con la pista vigente (la del equipo o, si no hay, la del diccionario)."""
+        del_equipo = leer_pistas(self.ruta_pistas)
+        return [{"codigo": it["codigo"], "texto": it["texto"], "pestana": it["pestana"], "bloque": it["bloque"], "pista": it["pista"],
+                 "pista_equipo": it["codigo"] in del_equipo}
+                for it in preguntables(cargar_preguntas(pistas=del_equipo)) if it["pestana"] != "Seguimiento"]
+
     def pasar_al_registro(self, usuario, clave, codigo=""):
         a = self.ajustes()
         url = a["url_registro"].rstrip("/")
@@ -399,34 +488,13 @@ class Estacion:
         if not usuario or not clave:
             raise ValueError("Escriba su usuario y contraseña del registro")
 
-        huella = a.get("huella_registro", "")
-        galletas = http.cookiejar.CookieJar()
-
         def fn():
             self._avance(0, len(props), "Conectando con el registro…")
-
-            def pedir(ruta, cuerpo):
-                try:
-                    with abrir_url(url + "/api/" + ruta, huella, json.dumps(cuerpo).encode(), galletas, timeout=60, metodo="POST") as r:
-                        return json.loads(r.read())
-                except CertificadoNoReconocido as e:
-                    raise RuntimeError("El certificado del registro no es el esperado" + (" (ha cambiado)" if e.cambiado else "")
-                                       + ": no se ha enviado nada. Revíselo en el circuito antes de seguir.")
-                except urllib.error.HTTPError as e:
-                    try:
-                        msg = json.loads(e.read()).get("error")
-                    except Exception:
-                        msg = None
-                    raise RuntimeError(msg or f"El registro respondió con error {e.code}")
-                except urllib.error.URLError:
-                    raise RuntimeError(f"No se puede conectar con el registro en {url}. ¿Está abierto?")
-            r = pedir("login", {"usuario": usuario, "clave": clave})
-            if r.get("paso") == "configurar_2fa":
-                raise RuntimeError("Antes de usar la estación, entre una vez en el registro desde el navegador para activar el doble factor")
-            if r.get("paso") == "codigo":
-                if not codigo:
-                    raise RuntimeError("El registro pide el código de 6 cifras de su móvil: vuelva a intentarlo escribiéndolo")
-                pedir("login/codigo", {"desafio": r["desafio"], "codigo": codigo})
+            pedir = self._sesion_registro(usuario, clave, codigo)
+            try:
+                self._guardar_pistas(pedir("pistas"), url)
+            except Exception:
+                pass  # registros antiguos sin pistas: no impide enviar
             imp = self.importadas()
             resultados = []
             for i in range(0, len(props), 10):
@@ -444,8 +512,7 @@ class Estacion:
                     self._avance(linea=f"Caso {num}: {linea}" + (f" · {res.get('aplicados')} datos" if res.get("aplicados") else "")
                                  + (f" · {res.get('motivo')}" if res.get("motivo") else ""))
                 self._avance(min(i + 10, len(props)), len(props), f"Enviados {min(i + 10, len(props))} de {len(props)}")
-                with open(os.path.join(self.privado, "importadas.json"), "w", encoding="utf-8") as f:
-                    json.dump(imp, f)
+                guardar_json(os.path.join(self.privado, "importadas.json"), imp)
             try:
                 pedir("logout", {})
             except Exception:
@@ -569,8 +636,14 @@ class Manejador(BaseHTTPRequestHandler):
                 E.anonimizar()
                 return self._json({"ok": True})
             if metodo == "POST" and ruta == "ia":
-                E.rellenar_ia(bool(b.get("rehacer")))
+                E.rellenar_ia(bool(b.get("rehacer")), b.get("variables") or None)
                 return self._json({"ok": True})
+            if metodo == "GET" and ruta == "preguntas":
+                return self._json(E.preguntas())
+            if metodo == "POST" and ruta == "pistas":
+                n = E.actualizar_pistas((b.get("usuario") or "").strip(), b.get("clave") or "", (b.get("codigo") or "").strip())
+                E.guardar_ajustes({"usuario_registro": (b.get("usuario") or "").strip()})
+                return self._json({"ok": True, "pistas": n})
             if metodo == "POST" and ruta == "cancelar":
                 E.cancelar.set()
                 E._avance(mensaje="Cancelando… (termina en unos segundos)")

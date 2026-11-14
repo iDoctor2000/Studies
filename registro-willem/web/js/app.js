@@ -6,7 +6,8 @@ import { anonimizar, extraer, EJEMPLO } from "./importador.js";
 import * as L from "./local.js";
 import * as ENV from "./envio.js";
 import { comprobarClave, accesoConcedido, recordarAcceso } from "./acceso.js";
-import { iaPendientes, marcarPorCampos, NOMBRE_ORIGEN } from "./ia.js";
+import { iaPendientes, marcarPorCampos, NOMBRE_ORIGEN, auditar, diagnosticosTexto } from "./ia.js";
+import { crearXlsx, descargar } from "./xlsx.js";
 
 // ===========================================================================
 //  Utilidades
@@ -156,6 +157,7 @@ async function enrutar() {
     else if (pag === "dudas") await pDudas();
     else if (pag === "envio" && esDM() && !S.info?.nas) await pEnvio();
     else if (pag === "ia" && esDM()) await pIA();
+    else if (pag === "auditoria" && esDM()) await pAuditoria();
     else if (pag === "carpeta" && navegador()) await pCarpeta();
     else if (pag === "unir" && navegador() && esDM()) await pUnir();
     else location.hash = "#/panel";
@@ -407,6 +409,7 @@ function pintarEstructura() {
         ${dm ? `<div class="titulo">Data manager</div>
         ${S.info?.nas ? "" : `<a href="#/llave" data-pag="llave">${icono("llave")} Libro llave</a>`}
         <a href="#/ia" data-pag="ia">${icono("chispa")} Importar de la IA</a>
+        <a href="#/auditoria" data-pag="auditoria">${icono("lupa")} Auditoría de la IA</a>
         ${navegador() ? `<a href="#/unir" data-pag="unir">${icono("unir")} Unir casos</a>` : ""}
         ${S.info?.nas ? "" : `<a href="#/envio" data-pag="envio">${icono("enviar")} Envío al registro</a>`}
         <a href="#/exportar" data-pag="exportar">${icono("exportar")} Exportar</a>
@@ -1513,6 +1516,125 @@ async function pLlave() {
 // ===========================================================================
 //  EXPORTAR
 // ===========================================================================
+// ===========================================================================
+//  AUDITORÍA DE LA IA: acierto por variable, detalle por caso y pistas clínicas
+// ===========================================================================
+/** Texto del valor actual de una pregunta en un caso (para comparar con lo que propuso la IA). */
+function valorActualTexto(it, v, caso) {
+  if (it.codigo === "_diagnosticos") return caso ? diagnosticosTexto(caso) : "";
+  const m = v[it.codigo];
+  if (m === NC) return "Desconocido";
+  if (m === DUDA) return "Duda";
+  const f = (x) => (x ? " · " + isoAFecha(x) : "");
+  switch (it.tipoCampo) {
+    case "sino": case "sinofecha": return m === 1 ? "Sí" + f(v[it.codigo + "_date"]) : m === 0 ? "No" : "";
+    case "single": { const o = it.opciones.find((x) => v[x.codigo] === 1); return o ? o.etiqueta + f(v[o.codigo + "_date"]) : ""; }
+    case "multi": return it.opciones.filter((x) => v[x.codigo] === 1).map((x) => x.etiqueta + f(v[x.codigo + "_date"])).join(", ");
+    case "fecha": return isoAFecha(m);
+    case "numero": case "entero": return m == null ? "" : String(m).replace(".", ",") + (it.unidad ? " " + it.unidad : "");
+    default: return m == null ? "" : String(m);
+  }
+}
+const ESTADO_AUD = { confirmado: ["Confirmado", "#16a34a"], corregido: ["Corregido", "#d97706"], quitado: ["Quitado", "#dc2626"], olvido: ["La IA no lo vio", "#7c3aed"],
+  pendiente: ["Sin revisar", "#64748b"], revisado: ["Revisado", "#16a34a"] };
+
+async function pAuditoria() {
+  barra("Auditoría de la IA", "Data manager", `<button class="btn" id="audX">${icono("exportar")} Excel</button>`);
+  await cargarCasos();
+  let pistas = {};
+  try { pistas = (await api("GET", "pistas")).pistas || {}; } catch { /* registro sin pistas */ }
+  const A = auditar(S.modelo.items, S.casos);
+  const F = { ver: "actividad", pest: "", q: "" };
+  const cont = $("#contenido");
+  const pistaDe = (it) => (it.codigo in pistas ? pistas[it.codigo] : it.pista || "");
+  const tot = A.filas.reduce((t, f) => { for (const k of ["propuestos", "pendiente", "confirmado", "corregido", "quitado", "olvidos", "avisos"]) t[k] += f[k]; return t; },
+    { propuestos: 0, pendiente: 0, confirmado: 0, corregido: 0, quitado: 0, olvidos: 0, avisos: 0 });
+  const juzgados = tot.confirmado + tot.corregido + tot.quitado;
+  const pct = (x) => (x == null ? "—" : Math.round(100 * x) + " %");
+
+  const pintar = () => {
+    const filas = A.filas.filter((f) => (F.ver === "todas" || (F.ver === "problemas" ? f.problemas > 0 : F.ver === "pista" ? !!pistaDe(f.it) : f.propuestos + f.olvidos > 0))
+      && (!F.pest || f.it.pestana === F.pest) && (!F.q || (f.it.etiqueta + " " + f.it.codigo).toLowerCase().includes(F.q.toLowerCase())))
+      .sort((a, b) => b.problemas - a.problemas || (a.acierto ?? 2) - (b.acierto ?? 2) || b.propuestos - a.propuestos);
+    cont.innerHTML = `
+      <div class="aviso-local">${icono("info")}<div><b>¿Qué tal acierta la IA en cada variable?</b> Se compara lo que propuso con lo que ha quedado después de que una persona lo revise.
+        Si una variable falla a menudo, abra su fila, mire los casos y escriba una <b>pista clínica</b>: la IA la tendrá en cuenta la próxima vez (en el Mac: «Repetir solo unas variables»).</div></div>
+      <div class="grid g-aud" style="margin-bottom:18px">
+        <div class="tarjeta kpi"><div class="ic">${icono("casos")}</div><div><div class="v">${A.casosIA}</div><div class="e">casos con datos de la IA</div></div></div>
+        <div class="tarjeta kpi"><div class="ic">${icono("chispa")}</div><div><div class="v">${tot.propuestos}</div><div class="e">datos propuestos · ${tot.pendiente} sin revisar</div></div></div>
+        <div class="tarjeta kpi"><div class="ic">${icono("check")}</div><div><div class="v">${pct(juzgados ? tot.confirmado / juzgados : null)}</div><div class="e">acierto (de ${juzgados} revisados con detalle)</div></div></div>
+        <div class="tarjeta kpi"><div class="ic">${icono("aviso")}</div><div><div class="v">${tot.corregido + tot.quitado}</div><div class="e">corregidos o quitados</div></div></div>
+        <div class="tarjeta kpi"><div class="ic">${icono("ojo")}</div><div><div class="v">${tot.olvidos}</div><div class="e">datos que la IA no vio</div></div></div>
+      </div>
+      <div class="filtros">
+        <div class="buscador">${icono("buscar")}<input id="audQ" placeholder="Buscar variable…" value="${esc(F.q)}"></div>
+        ${[["actividad", "Con datos"], ["problemas", "Con fallos"], ["pista", "Con pista"], ["todas", "Todas"]].map(([k, t]) => `<span class="chip ${F.ver === k ? "on" : ""}" data-ver="${k}">${t}</span>`).join("")}
+        <select class="inp" id="audP" style="width:auto;height:36px"><option value="">Todas las pestañas</option>${S.modelo.pestanas.map((p) => `<option ${F.pest === p ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>
+      </div>
+      <div class="tarjeta" style="overflow-x:auto">${filas.length ? `<table class="tabla tabla-aud"><thead><tr><th>Variable</th><th title="Casos en los que la IA propuso un dato">Propuestas</th><th>Sin revisar</th>
+          <th title="La persona lo dio por bueno">Confirmadas</th><th title="La persona cambió el valor">Corregidas</th><th title="La persona borró el dato">Quitadas</th>
+          <th title="La IA no propuso nada y una persona anotó un dato positivo">No lo vio</th><th>Acierto</th><th>Pista clínica</th></tr></thead><tbody>
+        ${filas.map((f) => `<tr data-k="${esc(f.it.codigo)}" class="${f.acierto != null && f.acierto < 0.8 && f.confirmado + f.corregido + f.quitado >= 3 ? "mal" : ""}">
+          <td><b>${esc(f.it.etiqueta)}</b><small>${esc(f.it.pestana.replace(/^\d+\.\s*/, ""))} · <span class="codigo">${esc(f.it.codigo)}</span></small></td>
+          <td>${f.propuestos}${f.avisos ? ` <span class="pill sec" style="--c:#d97706" title="Con aviso automático">${f.avisos}</span>` : ""}</td><td>${f.pendiente || ""}</td>
+          <td class="ok">${f.confirmado + f.revisado || ""}</td><td class="warn">${f.corregido || ""}</td><td class="bad">${f.quitado || ""}</td><td class="ia">${f.olvidos || ""}</td>
+          <td>${f.acierto == null ? `<span class="sub">—</span>` : `<div class="barra-aud" title="${f.confirmado} de ${f.confirmado + f.corregido + f.quitado}"><i style="width:${Math.round(100 * f.acierto)}%"></i><span>${pct(f.acierto)}</span></div>`}</td>
+          <td class="pista-celda">${pistaDe(f.it) ? `<span class="${f.it.codigo in pistas ? "del-equipo" : ""}" title="${esc(pistaDe(f.it))}">${icono("editar")} ${esc(pistaDe(f.it))}</span>` : `<span class="sub">${icono("mas")} añadir</span>`}</td></tr>`).join("")}
+        </tbody></table>` : `<div class="vacio">${icono("chispa")}<p>${A.casosIA ? "Ninguna variable con estos filtros." : "Todavía no hay casos importados de la IA."}</p></div>`}</div>`;
+    $$("[data-ver]", cont).forEach((x) => (x.onclick = () => { F.ver = x.dataset.ver; pintar(); }));
+    $("#audP").onchange = (ev) => { F.pest = ev.target.value; pintar(); };
+    const q = $("#audQ"); q.oninput = () => { F.q = q.value; const pos = q.selectionStart; pintar(); const n = $("#audQ"); n.focus(); n.setSelectionRange(pos, pos); };
+    $$("tr[data-k]", cont).forEach((tr) => (tr.onclick = () => detalle(A.filas.find((f) => f.it.codigo === tr.dataset.k))));
+  };
+
+  const detalle = (f) => {
+    const it = f.it;
+    const cj = cajon(it.etiqueta, `${esc(it.pestana.replace(/^\d+\.\s*/, ""))} · <span class="codigo">${esc(it.codigo)}</span>`, "lupa");
+    const casoDe = (n) => S.casos.find((c) => c.numero === n);
+    const orden = { quitado: 0, corregido: 1, olvido: 2, pendiente: 3, confirmado: 4, revisado: 5 };
+    cj.cuerpo.innerHTML = `
+      <div class="form"><label><b>Pista clínica para la IA</b>
+        <textarea class="inp" id="pTxt" rows="4" placeholder="Ej.: «Si pone "resto igual" o "resto sin cambios", se mantiene el tratamiento previo».">${esc(pistaDe(it))}</textarea></label>
+        <div class="sub">${it.codigo in pistas ? "Escrita por el equipo." : it.pista ? "Pista inicial del diccionario: puede cambiarla." : "Sin pista: escriba cómo quiere que la IA interprete esta variable."}
+          Se aplica en la próxima extracción (en el Mac: «Pasar al registro» o «Actualizar pistas», y después ${it.codigo === "_diagnosticos" ? "repetir el caso entero, porque de los diagnósticos depende todo lo demás" : "«Repetir solo unas variables»"}).</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primario" id="pGuardar">${icono("check")} Guardar pista</button>
+          ${it.codigo in pistas ? `<button class="btn" id="pRest">${it.pista ? "Volver a la inicial" : "Quitar pista"}</button>` : ""}</div></div>
+      <h4 class="tit-det">Casos (${f.detalle.length})</h4>
+      ${f.detalle.length ? `<ul class="lista-aud">${[...f.detalle].sort((a, b) => orden[a.estado] - orden[b.estado] || a.numero - b.numero).map((d) => {
+        const c = casoDe(d.numero), fin = c ? valorActualTexto(it, c.valores, c) : "";
+        const [txt, col] = ESTADO_AUD[d.estado];
+        return `<li><div class="cab-aud"><a href="#/caso/${d.numero}" class="num-caso"><small>#</small>${pad(d.numero)}</a><span class="pill sec" style="--c:${col}">${txt}</span>
+            <span class="cambio-aud">${d.estado === "olvido" ? `<del>(nada)</del> → <ins>${esc(fin)}</ins>` : d.estado === "confirmado" || d.estado === "pendiente" || d.estado === "revisado" ? `<b>${esc(d.ia)}</b>`
+              : `<del>${esc(d.ia)}</del> → <ins>${esc(fin || "(sin dato)")}</ins>`}</span></div>
+          ${d.cita ? `<blockquote class="cita-ia">${esc(d.cita)}</blockquote>` : ""}${d.aviso ? `<div class="aviso-ia">${icono("aviso")} ${esc(d.aviso)}</div>` : ""}</li>`;
+      }).join("")}</ul>` : `<p class="sub">Ningún caso con datos de la IA en esta variable.</p>`}`;
+    cj.pie.remove();
+    const guardar = async (cuerpo, msg) => {
+      try {
+        await api("PUT", "pistas/" + it.codigo, cuerpo);
+        if (cuerpo.restaurar) delete pistas[it.codigo]; else pistas[it.codigo] = cuerpo.texto.trim();
+        toast(msg); cj.cerrar(); pintar();
+      } catch (e) { toast(e.message, "mal"); }
+    };
+    $("#pGuardar", cj.cuerpo).onclick = () => guardar({ texto: $("#pTxt", cj.cuerpo).value }, "Pista guardada");
+    $("#pRest", cj.cuerpo)?.addEventListener("click", () => guardar({ restaurar: true }, "Pista restaurada"));
+    $$("a.num-caso", cj.cuerpo).forEach((a) => a.addEventListener("click", () => cj.cerrar()));
+  };
+
+  $("#audX").onclick = () => {
+    const resumen = [["variable", "codigo", "pestaña", "propuestas", "con_aviso", "sin_revisar", "confirmadas", "corregidas", "quitadas", "la_IA_no_lo_vio", "acierto_%", "pista_clinica", "pista_del_equipo"],
+      ...A.filas.filter((f) => f.propuestos + f.olvidos > 0 || pistaDe(f.it)).map((f) => [f.it.etiqueta, f.it.codigo, f.it.pestana, f.propuestos, f.avisos, f.pendiente, f.confirmado + f.revisado, f.corregido, f.quitado, f.olvidos,
+        f.acierto == null ? "" : Math.round(100 * f.acierto), pistaDe(f.it), f.it.codigo in pistas ? "Sí" : ""])];
+    const det = [["patient_id", "variable", "codigo", "estado", "valor_IA", "valor_final", "aviso", "frase_del_informe"]];
+    for (const f of A.filas) for (const d of f.detalle) {
+      const c = S.casos.find((x) => x.numero === d.numero);
+      det.push([d.numero, f.it.etiqueta, f.it.codigo, ESTADO_AUD[d.estado][0], d.ia, c ? valorActualTexto(f.it, c.valores, c) : "", d.aviso, d.cita]);
+    }
+    descargar(crearXlsx([["Auditoria_IA", resumen], ["Detalle", det]]), `WILLEM_auditoria_IA_${hoyIso()}.xlsx`);
+  };
+  pintar();
+}
+
 async function pIA() {
   barra("Importar de la IA", "Propuestas de la IA local (Mac)");
   const cont = $("#contenido");

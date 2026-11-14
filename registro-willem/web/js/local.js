@@ -201,6 +201,17 @@ export async function apiLocal(metodo, url, b) {
     programarGuardado();
     return { ok: true };
   }
+  if (R === "GET pistas") return { pistas: (await kvGet("pistas")) || {} };
+  if (R === "PUT pistas") {
+    if (yo.rol !== "dm") err("Solo los data managers pueden hacer esto");
+    if (!/^[a-z0-9_]{1,80}$/.test(id || "")) err("Variable no válida");
+    const pistas = (await kvGet("pistas")) || {};
+    const antes = pistas[id] ?? null;
+    if (b.restaurar) delete pistas[id]; else pistas[id] = String(b.texto || "").trim().slice(0, 1500);
+    await kvSet("pistas", pistas);
+    await auditar([{ numero: null, usuario: yo.usuario, fecha: ahora(), campo: `(pista IA) ${id}`, antes, despues: b.restaurar ? null : pistas[id], origen: "formulario" }]);
+    return { ok: true };
+  }
   if (R === "GET auditoria") {
     let filas = q.get("caso") ? await tx("auditoria", "readonly", (s) => req(s.index("numero").getAll(+q.get("caso")))) : await todos("auditoria");
     filas.sort((a, b2) => (b2.fecha || "").localeCompare(a.fecha || "") || b2.id - a.id);

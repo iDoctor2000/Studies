@@ -700,6 +700,7 @@ def aplicar_propuesta(salida, ruta):
     # Orden del CRF original: el Excel final se exporta siempre en este orden
     for d in out:
         d["orden_registro"] = d.get("_fila") if d.get("exportar_al_registro") == "Sí" else ""
+        d["pista_IA"] = PISTAS.get(d.get("codigo_variable"), "")
     # Fallecimiento como opción de "Eventos durante el seguimiento"
     muerte = next((d for d in out if d.get("_fila") == 228), None)
     eventos = next((d for d in out if d.get("_fila") == 231), None)
@@ -732,8 +733,36 @@ CABECERA_BASE = [
     "valor_min", "valor_max", "valor_fijo", "exportar_al_registro",
     "columnas_en_exportacion", "comentarios_equipo",
 ]
-CABECERA = CABECERA_BASE[:2] + ["bloque"] + CABECERA_BASE[2:-1] + ["tipo_formulario", "oculto", "valor_por_defecto", "copiar_de", "calcular", "orden_registro", "comentarios_equipo"]
-ANCHOS = [6, 30, 26, 38, 13, 30, 45, 45, 40, 13, 22, 26, 12, 16, 34, 9, 9, 11, 11, 44, 16, 9, 22, 30, 50, 10, 40]
+CABECERA = CABECERA_BASE[:2] + ["bloque"] + CABECERA_BASE[2:-1] + ["tipo_formulario", "oculto", "valor_por_defecto", "copiar_de", "calcular", "orden_registro", "pista_IA", "comentarios_equipo"]
+ANCHOS = [6, 30, 26, 38, 13, 30, 45, 45, 40, 13, 22, 26, 12, 16, 34, 9, 9, 11, 11, 44, 16, 9, 22, 30, 50, 10, 60, 40]
+
+# Pistas clínicas para la IA local (columna pista_IA). Son un PUNTO DE PARTIDA: el equipo las corrige y amplía
+# desde la web (Auditoría de la IA), y lo que se escriba allí sustituye a lo de aquí.
+PISTAS = {
+    "echocardiography_lvef": "Usa la FEVI del ecocardiograma hecho durante ESTE ingreso (pruebas complementarias o diagnóstico). No uses la de ecocardiogramas antiguos citados en los antecedentes. Si solo dice «normal» o «conservada» sin cifra, null.",
+    "echocardiography_procedure": "Fecha del ecocardiograma de este ingreso. Si no consta el día exacto, null (no uses la fecha de ecocardiogramas antiguos).",
+    "laboratory_biomarkers_test": "Fecha de la analítica de la que se toman los valores; si son los de urgencias al ingreso y no se indica otra, la fecha de ingreso.",
+    "natriuretic_peptide_nt_probnp": "Primer valor del ingreso (urgencias). Puede venir como «NTproBNP», «NT-proBNP» o «proBNP». Un punto puede ser separador de miles: «1.216» es 1216.",
+    "creatinine": "Primer valor del ingreso, en mg/dL (suele venir como «Creatinina» o «crea»).",
+    "systolic_blood_pressure_mean": "De la exploración física al ingreso: en «TA: 130/90» la sistólica es 130.",
+    "diastolic_blood_pressure_mean": "De la exploración física al ingreso: en «TA: 130/90» la diastólica es 90.",
+    "resting_heart_rate": "FC de la exploración física al ingreso, en lpm.",
+    "nyha_functional_class": "La clase funcional BASAL (situación basal del paciente), no la del momento de la descompensación.",
+    "hypertension": "«HTA» = 1. «No HTA» o «sin HTA» = 0. Suele estar en FRCV / antecedentes.",
+    "hypertension_medication": "1 si en el tratamiento crónico hay antihipertensivos (IECA, ARA-II, calcioantagonistas, diuréticos, betabloqueantes...).",
+    "diabetes": "«DM2» o «DM tipo 2» = tipo 2. «No DM» = No.",
+    "dyslipidaemia": "«Dislipemia», «DLP» o «hipercolesterolemia» = 1.",
+    "tobacco_habit": "«Exfumador» no es fumador activo. «No hábitos tóxicos» = no fumador.",
+    "prior_arrhythmias": "1 si consta fibrilación auricular, flutter, taquicardia o fibrilación ventricular, o preexcitación.",
+    "prior_atrial_fibrillation": "1 si consta FA (paroxística, persistente o permanente) en antecedentes o como diagnóstico.",
+    "conduction_abnormality": "BRIHH o BRI = bloqueo de rama izquierda. BRDHH o BRD = bloqueo de rama derecha. BAV o «PR largo» = bloqueo AV. BIRI/BIRD (incompletos) no cuentan como bloqueo completo: marca «Otro».",
+    "coronary_artery_disease": "1 si consta cardiopatía isquémica, infarto, angina, stents o cirugía de bypass.",
+    "prior_heart_failure_hospitalization": "1 solo si consta un ingreso ANTERIOR a este por insuficiencia cardiaca.",
+    "chronic_kidney_disease": "ERC, IRC, insuficiencia renal crónica o trasplante renal = 1.",
+    "heart_failure_diagnosis_date": "Fecha del primer diagnóstico de IC. Si este ingreso es el debut, la fecha de ingreso. Si la IC es anterior y no consta la fecha, null.",
+    "weight": "Peso en kg tal y como consta; no lo calcules.",
+    "height": "Talla en cm tal y como consta; si viene en metros (1,68), pásala a cm (168).",
+}
 
 
 def estilo_cabecera(ws, ncols):
@@ -803,7 +832,7 @@ def write(dst, salida):
     gris = PatternFill("solid", fgColor="EDEDED")
     rojo = PatternFill("solid", fgColor="F8CBAD")
     editables = {CABECERA.index(k) + 1 for k in ("texto_ES", "ayuda_ES", "patologias", "mostrar_solo_si", "valor_min", "valor_max",
-                                                 "exportar_al_registro", "tipo_formulario", "oculto", "valor_por_defecto", "copiar_de", "comentarios_equipo")}
+                                                 "exportar_al_registro", "tipo_formulario", "oculto", "valor_por_defecto", "copiar_de", "pista_IA", "comentarios_equipo")}
     fino = Side(style="thin", color="BFBFBF")
     for r in range(2, ws.max_row + 1):
         es_cab = ws.cell(r, 12).value and not ws.cell(r, 5).value

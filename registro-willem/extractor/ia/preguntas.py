@@ -69,7 +69,9 @@ def unidad(r):
     return f.replace("standard drinks/week", "UBE/sem").replace("hours/week", "h/sem").replace("beats/min", "lpm")
 
 
-def cargar_preguntas(ruta=DICCIONARIO):
+def cargar_preguntas(ruta=DICCIONARIO, pistas=None):
+    """pistas: {codigo: texto} escritas por el equipo en el registro; sustituyen a las del diccionario."""
+    pistas = pistas or {}
     with open(ruta, encoding="utf-8") as f:
         dic = json.load(f)
     filas = dic["campos"] + dic.get("locales", [])
@@ -95,6 +97,7 @@ def cargar_preguntas(ruta=DICCIONARIO):
             "pestana": re.sub(r"^\d+\.\s*", "", _t(r.get("pestaña"))), "bloque": _t(r.get("bloque")),
             "min": _num(r.get("valor_min")), "max": _num(r.get("valor_max")), "unidad": unidad(r),
             "calculado": bool(_t(r.get("calcular"))) or bool(_t(r.get("copiar_de"))),
+            "pista": _t(pistas[codigo]) if codigo in pistas else _t(r.get("pista_IA")),
         }
         if _t(r.get("tipo_seleccion")):
             # en las preguntas con opciones, "copiar_de" se refiere a su fecha, no a la respuesta
@@ -166,6 +169,8 @@ def describir(it):
         q = f"{txt} [texto breve]"
     if it["ayuda"]:
         q += f" — {it['ayuda']}"
+    if it.get("pista"):
+        q += f" — CRITERIO DEL EQUIPO CLÍNICO: {it['pista']}"
     return f"- {it['codigo']}: {q}"
 
 

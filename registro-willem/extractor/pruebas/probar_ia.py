@@ -86,6 +86,8 @@ def main():
     inf = {"texto": "Ecocardiograma (05/01/2025): FEVI 38 %.\nNYHA II.", "fecha_alta": "2025-01-15"}
     ok(cita_en_informe("Ecocardiograma (05/01/2025):  FEVI 38 %", inf["texto"]), "cita encontrada aunque cambien espacios")
     ok(not cita_en_informe("FEVI 45 %", inf["texto"]), "cita inventada detectada")
+    ok(cita_en_informe("HTA", "FRCV: HTA. DM2.") and cita_en_informe("DM2", "FRCV: HTA. DM2.") and not cita_en_informe("HTA", "No HTAP severa"),
+       "citas muy cortas («HTA», «DM2»): valen si son una palabra completa del informe")
     c = convertir(items["echocardiography_lvef"], {"valor": 38, "cita": "FEVI 38 %"}, inf)
     ok(c[0] == {"echocardiography_lvef": 38} and not c[2], "FEVI 38 % → 38, sin avisos")
     c = convertir(items["echocardiography_lvef"], {"valor": 83, "cita": "FEVI 38 %"}, inf)
@@ -183,6 +185,26 @@ def main():
     except RespuestaCortada as e:
         ok("tiempo máximo" in str(e), "tope de tiempo por respuesta: se corta y avisa")
     ia_simulada.AVERIAS.update(lenta=0)
+
+    print("\n5) Pistas clínicas y repetir solo unas variables")
+    from preguntas import describir
+    con_pista = {it["codigo"]: it for it in cargar_preguntas(pistas={"resting_heart_rate": "La FC es la de la exploración física."})}
+    ok("CRITERIO DEL EQUIPO CLÍNICO: La FC es la de la exploración" in describir(con_pista["resting_heart_rate"]), "la pista del equipo se añade a la pregunta")
+    ok("CRITERIO DEL EQUIPO CLÍNICO" in describir(con_pista["echocardiography_lvef"]), "las pistas iniciales del diccionario también se usan")
+    ok("CRITERIO" not in describir({**con_pista["dyslipidaemia"], "pista": ""}), "sin pista, la pregunta no cambia")
+    ext2 = Extraccion(ia, list(con_pista.values()))
+    n0 = len(llamadas)
+    ia_simulada.AVERIAS.update(fc_bien=True)  # como si la pista hubiera corregido el fallo
+    pr, cambiadas = ext2.reextraer(json.loads(json.dumps(p1)), por_caso[1], {"resting_heart_rate", "dyslipidaemia"}, progreso=lambda *_: None)
+    ia_simulada.AVERIAS.update(fc_bien=False)
+    ok(len(llamadas) - n0 == 2, f"solo se pregunta por esas variables ({len(llamadas) - n0} llamadas, no 8)")
+    ok("La FC es la de la exploración" in llamadas[-2]["messages"][-1]["content"] + llamadas[-1]["messages"][-1]["content"], "la pista viaja en la pregunta a la IA")
+    ok(pr["valores"]["resting_heart_rate"] == 72 and not pr["ia"]["resting_heart_rate"]["aviso"] and cambiadas == 1, "FC 400 → 72: una respuesta cambiada")
+    resto = lambda d: {k: v for k, v in d.items() if k != "resting_heart_rate"}  # noqa: E731
+    ok(resto(pr["valores"]) == resto(p1["valores"]) and set(pr["ia"]) == set(p1["ia"]), "el resto de la propuesta no se toca")
+    ok(pr["repeticiones"][-1]["variables"] == ["dyslipidaemia", "resting_heart_rate"] and pr["diagnosticos"] == p1["diagnosticos"], "queda anotada la repetición; diagnósticos intactos")
+    filas, _, estado = ejecutar(ia, sal, [(1, por_caso[1])], progreso=lambda *_: None, ruta_log=ruta_log, variables=["echocardiography_lvef"])
+    ok(estado == "ok" and filas[0].get("cambiadas") == 0, "ejecutar con variables: repite sobre la propuesta guardada (0 cambios si la IA dice lo mismo)")
 
     destino = sys.argv[1] if len(sys.argv) > 1 else None
     if destino:

@@ -45,7 +45,7 @@ export function construirModelo(dic) {
     const ctrl = txt(r.control_en_pantalla);
     const base = {
       codigo, etiqueta: txt(r.texto_ES) || txt(r.texto_original_EN) || codigo,
-      ayuda: txt(r.ayuda_ES), original: txt(r.texto_original_EN),
+      ayuda: txt(r.ayuda_ES), original: txt(r.texto_original_EN), pista: txt(r.pista_IA),
       grupos: txt(r.patologias || "COMUN").toUpperCase().split(/[\s,;]+/).filter(Boolean),
       cond: compilarCondicion(r.mostrar_solo_si), condTexto: txt(r.mostrar_solo_si),
       pestana: txt(r["pestaña"]) || "Otros", bloque: txt(r.bloque), local: !!r.local, provisional: !!txt(r.codigo_provisional),

@@ -67,6 +67,10 @@ export function aplicarPropuesta(caso, p, { principales, diagnosticos, siteId, u
   for (const [k, meta] of Object.entries(p.ia || {})) {
     const cods = (meta.codigos || []).filter((c) => /^[a-z0-9_]{1,80}$/.test(c) && !["site_id", "patient_id", "authored_at"].includes(c));
     if (!cods.length) continue;
+    const nuevos = Object.fromEntries(cods.map((c) => [c, p.valores?.[c] ?? null]));
+    const previo = caso.ia[k];
+    // una persona ya revisó (confirmó, corrigió o quitó) esta misma propuesta: no se repite
+    if (previo?.revisado && previo.valores_ia && JSON.stringify(previo.valores_ia) === JSON.stringify(nuevos)) { omitidos++; continue; }
     if (cods.some((c) => tieneValor(v[c]) && !deIA.has(c))) { omitidos++; continue; }
     for (const c of cods) {
       const nuevo = p.valores?.[c] ?? null;
@@ -74,7 +78,7 @@ export function aplicarPropuesta(caso, p, { principales, diagnosticos, siteId, u
       if (nuevo === null) delete v[c]; else v[c] = nuevo;
     }
     caso.ia[k] = { valor_texto: String(meta.valor_texto ?? ""), cita: String(meta.cita ?? ""), aviso: String(meta.aviso ?? ""),
-      origen: meta.origen || "ia", codigos: cods, revisado: false };
+      origen: meta.origen || "ia", codigos: cods, revisado: false, valores_ia: nuevos };
     aplicados++;
   }
   for (const inf of p.informes || []) {
@@ -85,4 +89,80 @@ export function aplicarPropuesta(caso, p, { principales, diagnosticos, siteId, u
   caso.informes.sort((a, b) => String(a.fecha_ingreso).localeCompare(String(b.fecha_ingreso)));
   caso.modificado = t; caso.modificado_por = usuario;
   return { caso, accion, aplicados, omitidos, auditoria };
+}
+
+// ---------------------------------------------------------------------------
+//  AUDITORÍA: ¿qué tal acierta la IA en cada variable?
+//  Compara lo que propuso (valores_ia) con lo que ha quedado tras la revisión humana.
+// ---------------------------------------------------------------------------
+const esNo = (t) => /^(no|ninguno|ninguna)$/i.test(String(t).trim());
+// Los diagnósticos del estudio se proponen y se auditan aparte (fila «Diagnósticos del estudio»)
+const DE_DIAGNOSTICO = new Set(["ischemic_cardiomyopathy", "heart_failure", "aortic_stenosis", "hypertrophic_cardiomyopathy", "long_qt_syndrome",
+  "amyloidosis_attr", "myocardial_infarction", "hypertensive_disease", "other_disease"]);
+export const FILA_DIAGNOSTICOS = { codigo: "_diagnosticos", etiqueta: "Diagnósticos del estudio", pestana: "1. Diagnósticos", tipoCampo: "diagnosticos", pista: "" };
+export const diagnosticosTexto = (c) => [c.principal, ...(c.secundarias || [])].filter(Boolean).join(", ");
+
+/** Códigos de campo de una pregunta del formulario. */
+export const codigosDe = (it) => (it.opciones ? it.opciones.map((o) => o.codigo) : [it.codigo]);
+
+/** ¿Ha anotado una persona un dato positivo en esta pregunta? (no cuenta «No» ni Desconocido) */
+function datoPositivo(it, v) {
+  if (v[it.codigo] === "NC" || v[it.codigo] === "DUDA") return false;
+  if (it.opciones) return it.opciones.some((o) => v[o.codigo] === 1 && !esNo(o.etiqueta));
+  if (it.tipoCampo === "sino" || it.tipoCampo === "sinofecha") return v[it.codigo] === 1;
+  return v[it.codigo] !== undefined && v[it.codigo] !== null && v[it.codigo] !== "";
+}
+
+/** Estado de una propuesta de la IA en un caso: pendiente | confirmado | corregido | quitado | revisado */
+export function estadoPropuesta(m, v) {
+  if (!m.revisado) return "pendiente";
+  if (!m.valores_ia) return "revisado";
+  const cods = Object.keys(m.valores_ia);
+  if (cods.every((c) => !tieneValor(v[c]))) return "quitado";
+  return cods.every((c) => (v[c] ?? null) === (m.valores_ia[c] ?? null)) ? "confirmado" : "corregido";
+}
+
+/**
+ * Devuelve { casosIA, filas:[{it, propuestos, avisos, pendiente, confirmado, corregido, quitado, revisado, olvidos, acierto, detalle:[...] }] }
+ * detalle: {numero, estado, ia: texto propuesto, cita, aviso}
+ */
+export function auditar(items, casos) {
+  const conIA = casos.filter((c) => Object.keys(c.ia || {}).some((k) => k !== "_diagnosticos"));
+  const filas = [];
+  {  // diagnósticos: lo que propuso la IA frente a los que tiene ahora el caso
+    const f = { it: FILA_DIAGNOSTICOS, propuestos: 0, avisos: 0, pendiente: 0, confirmado: 0, corregido: 0, quitado: 0, revisado: 0, olvidos: 0, detalle: [] };
+    for (const c of casos) {
+      const m = c.ia?._diagnosticos;
+      if (!m) continue;
+      const e = !m.revisado ? "pendiente" : m.valor_texto === diagnosticosTexto(c) ? "confirmado" : "corregido";
+      f.propuestos++; f[e]++;
+      if (m.aviso) f.avisos++;
+      f.detalle.push({ numero: c.numero, estado: e, ia: m.valor_texto, cita: m.cita, aviso: m.aviso, origen: "ia" });
+    }
+    const j = f.confirmado + f.corregido;
+    f.acierto = j ? f.confirmado / j : null;
+    f.problemas = f.corregido;
+    filas.push(f);
+  }
+  for (const it of items) {
+    if (["fijo", "caso", "auto"].includes(it.tipoCampo) || DE_DIAGNOSTICO.has(it.codigo)) continue;
+    const f = { it, propuestos: 0, avisos: 0, pendiente: 0, confirmado: 0, corregido: 0, quitado: 0, revisado: 0, olvidos: 0, detalle: [] };
+    for (const c of conIA) {
+      const m = c.ia[it.codigo];
+      if (m) {
+        const e = estadoPropuesta(m, c.valores);
+        f.propuestos++; f[e]++;
+        if (m.aviso) f.avisos++;
+        f.detalle.push({ numero: c.numero, estado: e, ia: m.valor_texto, cita: m.cita, aviso: m.aviso, origen: m.origen });
+      } else if (datoPositivo(it, c.valores)) {
+        f.olvidos++;
+        f.detalle.push({ numero: c.numero, estado: "olvido", ia: "", cita: "", aviso: "" });
+      }
+    }
+    const juzgados = f.confirmado + f.corregido + f.quitado;
+    f.acierto = juzgados ? f.confirmado / juzgados : null;
+    f.problemas = f.corregido + f.quitado + f.olvidos;
+    filas.push(f);
+  }
+  return { casosIA: conIA.length, filas };
 }

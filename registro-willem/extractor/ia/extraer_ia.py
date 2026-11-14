@@ -61,8 +61,13 @@ def cita_en_informe(cita, texto):
     if not cita or not cita.strip():
         return False
     t = compacto(texto)
-    partes = [p for p in re.split(r"\.\.\.|…|\[\.\.\.\]", cita) if len(compacto(p)) >= 4]
-    return bool(partes) and all(compacto(p) in t for p in partes)
+    partes = [p for p in re.split(r"\.\.\.|…|\[\.\.\.\]", cita) if compacto(p)]
+    if not partes or sum(len(compacto(p)) for p in partes) < 2:
+        return False
+    # las citas muy cortas («HTA», «DM2») deben aparecer como palabra completa, no dentro de otra
+    return all((compacto(p) in t) if len(compacto(p)) >= 4
+               else re.search(r"(?<![a-z0-9])" + re.escape(sin_tildes(p).lower().strip()) + r"(?![a-z0-9])", sin_tildes(texto).lower()) is not None
+               for p in partes)
 
 
 def _num_en_cita(v, cita):
@@ -206,6 +211,7 @@ class Extraccion:
         self.items = items
         self.por_codigo = {it["codigo"]: it for it in items}
         self.registro = registro or (lambda linea: None)  # función que anota una línea en el registro
+        self.pista_diagnosticos = ""  # criterio del equipo para elegir los diagnósticos del estudio
         self.incidencias = 0
 
     def _preguntar(self, informe, preguntas, esquema, max_tokens=2048, etiqueta=""):
@@ -247,7 +253,8 @@ class Extraccion:
         pregunta = ("¿Cuáles de estas cardiopatías tiene diagnosticadas el paciente según el informe "
                     "(como diagnóstico del ingreso o como antecedente)? Incluye solo las que estén escritas. "
                     "Para OTRO, indica en «texto» cuál es. En «principal», la que motivó este ingreso "
-                    f"(si es una de la lista):\n{lista}")
+                    f"(si es una de la lista):\n{lista}"
+                    + (f"\nCRITERIO DEL EQUIPO CLÍNICO: {self.pista_diagnosticos}" if self.pista_diagnosticos else ""))
         try:
             r = self._preguntar(informe, pregunta, ESQUEMA_DIAGNOSTICOS, max_tokens=900, etiqueta="diagnósticos")
         except RespuestaCortada:  # un segundo intento antes de dar el caso por fallido
@@ -326,6 +333,54 @@ class Extraccion:
                        "codigos": sorted(p["cambios"])} for k, p in propuestas.items()},
             "descartadas": descartadas,
         }
+
+    def reextraer(self, prop, informes, claves, progreso=print):
+        """Repite SOLO las preguntas indicadas sobre el informe índice y actualiza la propuesta existente.
+
+        El resto de la propuesta no se toca. Devuelve (propuesta, n_cambiadas)."""
+        informes = sorted(informes, key=lambda i: i.get("fecha_ingreso") or "")
+        indice = informes[0]
+        t0 = time.time()
+        self.incidencias = 0
+        codigos_diag = [d["codigo"] for d in prop.get("diagnosticos") or []]
+        propuestas = {k: {"cambios": {c: prop["valores"].get(c) for c in m.get("codigos", []) if c in prop["valores"]},
+                          "valor_texto": m.get("valor_texto", ""), "cita": m.get("cita", ""),
+                          "avisos": [a for a in (m.get("aviso") or "").split("; ") if a], "origen": m.get("origen", "ia")}
+                      for k, m in (prop.get("ia") or {}).items()}
+        antes = {k: json.dumps(propuestas[k]["cambios"], sort_keys=True) for k in propuestas}
+        elegidas = [it for it in preguntables(self.items) if it["codigo"] in claves and it["pestana"] != "Seguimiento"]
+        descartadas = [d for d in prop.get("descartadas") or [] if d.get("codigo") not in claves]
+        tandas = lotes(elegidas)
+        for i, lote in enumerate(tandas, 1):
+            progreso(f"    tanda {i}/{len(tandas)} · {lote[0]['pestana']} ({len(lote)} preguntas)…")
+            r = self._lote(indice, lote, descartadas, progreso, f"repetición {i}/{len(tandas)}")
+            for it in lote:
+                propuestas.pop(it["codigo"], None)  # la respuesta nueva sustituye a la anterior (también si ahora no hay dato)
+                conv = convertir(it, r.get(it["codigo"]), indice)
+                if not conv:
+                    continue
+                cambios, txt, avisos = conv
+                if not cambios:
+                    descartadas.append({"codigo": it["codigo"], "motivo": "; ".join(avisos)})
+                    continue
+                if not aplica(it, codigos_diag):
+                    descartadas.append({"codigo": it["codigo"], "motivo": "No corresponde a los diagnósticos propuestos"})
+                    continue
+                propuestas[it["codigo"]] = {"cambios": cambios, "valor_texto": txt, "cita": (r[it["codigo"]].get("cita") or "")[:300],
+                                            "avisos": avisos, "origen": "ia"}
+        self.condiciones(propuestas, descartadas)
+        valores = {}
+        for p in propuestas.values():
+            valores.update(p["cambios"])
+        cambiadas = sum(1 for k in set(antes) | set(propuestas)
+                        if antes.get(k) != (json.dumps(propuestas[k]["cambios"], sort_keys=True) if k in propuestas else None))
+        prop = dict(prop)
+        prop.update(generado=dt.datetime.now().replace(microsecond=0).isoformat(), valores=valores, descartadas=descartadas,
+                    segundos=round(time.time() - t0, 1), incidencias=self.incidencias,
+                    ia={k: {"valor_texto": p["valor_texto"], "cita": p["cita"], "aviso": "; ".join(p["avisos"]), "origen": p["origen"],
+                            "codigos": sorted(p["cambios"])} for k, p in propuestas.items()})
+        prop.setdefault("repeticiones", []).append({"fecha": prop["generado"], "variables": sorted(claves), "cambiadas": cambiadas})
+        return prop, cambiadas
 
     def seguimiento(self, reingresos, propuestas):
         hf, no_hf, muerte = [], [], None
@@ -435,10 +490,31 @@ def pasos(casos, n_tandas):
     return sum(1 + n_tandas + (1 if len(infs) > 1 else 0) for _, infs in casos)
 
 
-def ejecutar(ia, salida, casos, progreso=print, al_caso=None, ruta_log=None):
+def leer_pistas(ruta):
+    """Pistas clínicas escritas por el equipo en el registro ({codigo: texto}); {} si no hay archivo."""
+    try:
+        with open(ruta, encoding="utf-8") as f:
+            d = json.load(f)
+        return {k: str(v) for k, v in (d.get("pistas") or {}).items()}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def casos_con_propuesta(salida, elegidos=None):
+    """Casos que ya tienen propuesta (para repetir solo unas variables). -> [(numero, [informes])]"""
+    out = []
+    for numero, informes in casos_a_procesar(salida, elegidos, rehacer=True):
+        if os.path.exists(os.path.join(salida, "propuestas_ia", f"caso_{numero:04d}.json")):
+            out.append((numero, informes))
+    return out
+
+
+def ejecutar(ia, salida, casos, progreso=print, al_caso=None, ruta_log=None, pistas=None, variables=None):
     """Extrae los casos indicados y guarda las propuestas. Devuelve (filas, ruta_resumen, estado).
 
-    estado: "ok", "cancelado" o "sin_conexion". Cada llamada a la IA se anota en el registro (ruta_log)."""
+    estado: "ok", "cancelado" o "sin_conexion". Cada llamada a la IA se anota en el registro (ruta_log).
+    pistas: criterios del equipo clínico por variable. variables: si se indica, se repiten SOLO esas
+    preguntas en los casos que ya tienen propuesta (el resto de la propuesta no se toca)."""
     destino = os.path.join(salida, "propuestas_ia")
     os.makedirs(destino, exist_ok=True)
     ruta_log = ruta_log or os.path.join(destino, "registro_ia.log")
@@ -451,15 +527,25 @@ def ejecutar(ia, salida, casos, progreso=print, al_caso=None, ruta_log=None):
                 f.write(f"{dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} · {quien}{linea}\n")
         except OSError:
             pass
-    ext = Extraccion(ia, cargar_preguntas(), registro=anotar)
-    anotar(f"=== Inicio: {len(casos)} caso(s) · modelo {ia.modelo} · tope de {ia.tiempo_max} s por respuesta ===")
+    ext = Extraccion(ia, cargar_preguntas(pistas=pistas), registro=anotar)
+    ext.pista_diagnosticos = (pistas or {}).get("_diagnosticos", "")
+    variables = set(variables or [])
+    anotar(f"=== Inicio: {len(casos)} caso(s) · modelo {ia.modelo} · tope de {ia.tiempo_max} s por respuesta"
+           + (f" · solo las variables: {', '.join(sorted(variables))}" if variables else "") + " ===")
     filas, estado = [], "ok"
     for numero, informes in casos:
         numero_actual[0] = numero
         progreso(f"  Caso {numero} ({len(informes)} informe(s))")
         fila = {"numero": numero, "informes": len(informes), "diags": [], "campos": 0, "avisos": 0, "segundos": 0, "incidencias": 0}
         try:
-            prop = ext.caso(numero, informes, progreso=progreso)
+            ruta_prop = os.path.join(destino, f"caso_{numero:04d}.json")
+            if variables and os.path.exists(ruta_prop):
+                with open(ruta_prop, encoding="utf-8") as f:
+                    prop, cambiadas = ext.reextraer(json.load(f), informes, variables, progreso=progreso)
+                fila["cambiadas"] = cambiadas
+                progreso(f"    → {cambiadas} respuesta(s) distinta(s) de la vez anterior")
+            else:
+                prop = ext.caso(numero, informes, progreso=progreso)
             fila["incidencias"] = prop.get("incidencias", 0)
             anotar(f"caso terminado: {len(prop['ia'])} datos, {prop['segundos']} s, {prop.get('incidencias', 0)} incidencia(s), "
                    f"{len(prop['descartadas'])} descartado(s)")
@@ -514,6 +600,8 @@ def main():
     ap.add_argument("--contexto", type=int, default=16384, help="tamaño de contexto del modelo (tokens)")
     ap.add_argument("--casos", help="solo estos casos, p. ej. 1,2,7")
     ap.add_argument("--rehacer", action="store_true", help="volver a extraer aunque ya haya propuesta")
+    ap.add_argument("--variables", help="repetir SOLO estas variables (códigos separados por comas) en los casos que ya tienen propuesta")
+    ap.add_argument("--pistas", help="archivo JSON con las pistas clínicas del equipo (lo descarga la Estación desde el registro)")
     ap.add_argument("--abrir", action="store_true")
     a = ap.parse_args()
     try:
@@ -522,12 +610,13 @@ def main():
     except ErrorIA as e:
         sys.exit(f"\n{e}\n")
     elegidos = {int(x) for x in a.casos.split(",")} if a.casos else None
-    casos = casos_a_procesar(a.salida, elegidos, a.rehacer)
+    variables = [x.strip() for x in a.variables.split(",") if x.strip()] if a.variables else None
+    casos = casos_con_propuesta(a.salida, elegidos) if variables else casos_a_procesar(a.salida, elegidos, a.rehacer)
     print(f"\nRegistro WILLEM · extracción con IA local ({a.modelo})\n")
     if not casos:
         print("  No hay casos nuevos que procesar (use --rehacer para repetir los que ya tienen propuesta).")
         return
-    filas, ruta_html, estado = ejecutar(ia, a.salida, casos)
+    filas, ruta_html, estado = ejecutar(ia, a.salida, casos, pistas=leer_pistas(a.pistas) if a.pistas else None, variables=variables)
     print(f"\nPropuestas en: {os.path.join(a.salida, 'propuestas_ia')}\nResumen: {ruta_html}"
           f"\nRegistro de la IA: {os.path.join(a.salida, 'propuestas_ia', 'registro_ia.log')}")
     if a.abrir and ruta_html and platform.system() == "Darwin":
