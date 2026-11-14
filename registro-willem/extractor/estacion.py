@@ -45,7 +45,7 @@ sys.path.insert(0, os.path.join(AQUI, "ia"))
 sys.path.insert(0, RAIZ)
 
 import revision  # noqa: E402
-from cliente import ClienteIA, ErrorIA  # noqa: E402
+from cliente import Cancelado, ClienteIA, ErrorIA  # noqa: E402
 from extraer_ia import casos_a_procesar, comprobar_modelo, ejecutar, pasos  # noqa: E402
 from llave import Llave  # noqa: E402
 from preguntas import cargar_preguntas, lotes, preguntables  # noqa: E402
@@ -142,6 +142,7 @@ class Estacion:
         self.trabajo = {"tipo": None, "activo": False}
         self._cache = {}
         self.registro_proc = None
+        self.cancelar = threading.Event()
 
     # ---------------- ajustes ----------------
     @property
@@ -293,8 +294,10 @@ class Estacion:
         with self.lock:
             if self.trabajo.get("activo"):
                 raise ValueError("Ya hay un trabajo en marcha: espere a que termine")
+            self.cancelar.clear()
             self.trabajo = {"tipo": tipo, "titulo": titulo, "activo": True, "hecho": 0, "total": 0, "mensaje": "Empezando…",
-                            "lineas": [], "inicio": time.time(), "fin": None, "error": None, "resultado": None}
+                            "lineas": [], "inicio": time.time(), "fin": None, "error": None, "resultado": None,
+                            "paso_inicio": time.time(), "detalle": "", "cancelable": tipo == "ia"}
 
         def correr():
             try:
@@ -311,9 +314,13 @@ class Estacion:
                 self._cache.clear()
         threading.Thread(target=correr, daemon=True).start()
 
-    def _avance(self, hecho=None, total=None, mensaje=None, linea=None):
+    def _avance(self, hecho=None, total=None, mensaje=None, linea=None, detalle=None):
         with self.lock:
+            if detalle is not None:
+                self.trabajo["detalle"] = detalle
             if hecho is not None:
+                if hecho != self.trabajo.get("hecho"):
+                    self.trabajo.update(paso_inicio=time.time(), detalle="")
                 self.trabajo["hecho"] = hecho
             if total is not None:
                 self.trabajo["total"] = total
@@ -354,6 +361,9 @@ class Estacion:
         a = self.ajustes()
         ia = ClienteIA(a["url_ia"], a["modelo"], a["proveedor"])
         comprobar_modelo(ia)
+        ia.cancelar = self.cancelar
+        ia.latido = lambda n, seg: self._avance(detalle=f"escribiendo la respuesta… {n} fragmentos")
+        ruta_log = os.path.join(self.privado, "registro_ia.log")
         casos = casos_a_procesar(self.salida, rehacer=rehacer)
         if not casos:
             raise ValueError("No hay casos nuevos para la IA (todos los informes listos ya tienen propuesta)")
@@ -370,9 +380,11 @@ class Estacion:
                     hecho[0] += 1
                     self._avance(hecho[0], total, t.rstrip("…"))
                 self._avance(linea=t)
-            filas, ruta = ejecutar(ia, self.salida, casos, progreso=prog)
-            self._avance(total, total)
-            return {"resumen": ruta, "casos": len(filas), "campos": sum(f["campos"] for f in filas),
+            filas, ruta, estado = ejecutar(ia, self.salida, casos, progreso=prog, ruta_log=ruta_log)
+            if estado == "ok":
+                self._avance(total, total)
+            return {"resumen": ruta, "estado": estado, "registro": ruta_log, "incidencias": sum(f.get("incidencias", 0) for f in filas),
+                    "casos": sum(1 for f in filas if not f.get("error")), "campos": sum(f["campos"] for f in filas),
                     "avisos": sum(f["avisos"] for f in filas), "errores": [f"Caso {f['numero']}: {f['error']}" for f in filas if f.get("error")],
                     "segundos": round(sum(f["segundos"] for f in filas))}
         self.lanzar("ia", "Rellenar con la IA", fn)
@@ -559,6 +571,10 @@ class Manejador(BaseHTTPRequestHandler):
             if metodo == "POST" and ruta == "ia":
                 E.rellenar_ia(bool(b.get("rehacer")))
                 return self._json({"ok": True})
+            if metodo == "POST" and ruta == "cancelar":
+                E.cancelar.set()
+                E._avance(mensaje="Cancelando… (termina en unos segundos)")
+                return self._json({"ok": True})
             if metodo == "POST" and ruta == "registro":
                 E.pasar_al_registro((b.get("usuario") or "").strip(), b.get("clave") or "", (b.get("codigo") or "").strip())
                 E.guardar_ajustes({"usuario_registro": (b.get("usuario") or "").strip()})
@@ -584,6 +600,11 @@ class Manejador(BaseHTTPRequestHandler):
                 ruta_a = destinos.get(b.get("que"))
                 if b.get("que") == "resumen":
                     ruta_a = (E.ver_trabajo().get("resultado") or {}).get("resumen")
+                if b.get("que") == "registro_ia":
+                    ruta_a = os.path.join(E.privado, "registro_ia.log")
+                    if not os.path.exists(ruta_a):
+                        raise ValueError("Todavía no hay registro de la IA")
+                    return self._json({"ruta": ruta_a, "abierto": abrir_en_finder(ruta_a)})
                 if not ruta_a:
                     raise ValueError("No hay nada que abrir")
                 os.makedirs(ruta_a, exist_ok=True) if b.get("que") != "resumen" else None

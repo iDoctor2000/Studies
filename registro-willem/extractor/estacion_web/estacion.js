@@ -361,8 +361,9 @@ function pintarTrabajo() {
   const clase = `trabajo ${t.activo ? "activo" : ""} ${t.error ? "error" : t.activo ? "" : "fin"}`;
   if (!$(".tr-cab", el) || el.dataset.tipo !== t.tipo + t.inicio) {
     el.dataset.tipo = t.tipo + t.inicio;
-    el.innerHTML = `<div class="tr-cab"><span class="tr-ic">${icono(ic)}</span><div class="tr-txt"><h3></h3><div class="tr-msg"></div></div><div class="tr-pct"></div></div>
-      <div class="barra"><i></i></div><div class="tr-meta"><span class="tr-tiempo"></span><span class="tr-eta"></span></div>
+    el.innerHTML = `<div class="tr-cab"><span class="tr-ic">${icono(ic)}</span><div class="tr-txt"><h3></h3><div class="tr-msg"></div></div>
+        <button class="btn peq peligro-suave oculto" id="bCancelar">${icono("x")} Cancelar</button><div class="tr-pct"></div></div>
+      <div class="barra"><i></i></div><div class="tr-meta"><span class="tr-tiempo"></span><span class="tr-paso"></span><span class="tr-eta"></span></div>
       <div class="tr-res"></div><ol class="tr-log"></ol>`;
   }
   el.className = clase;
@@ -371,13 +372,19 @@ function pintarTrabajo() {
   const r0 = t.resultado;
   const final = !t.activo && !t.error && r0 ? ({
     anonimizar: () => `${plural(r0.listo + r0.revisar + r0.bloqueado, "informe leído", "informes leídos")} · ${plural(r0.nuevos, "paciente nuevo", "pacientes nuevos")} en el libro llave`,
-    ia: () => `${plural(r0.campos, "dato propuesto", "datos propuestos")} en ${plural(r0.casos, "caso", "casos")}: ahora se pasan al registro para revisarlos`,
+    ia: () => (r0.estado === "cancelado" ? `Cancelado: ${plural(r0.casos, "caso terminado", "casos terminados")} (se conservan)` : `${plural(r0.campos, "dato propuesto", "datos propuestos")} en ${plural(r0.casos, "caso", "casos")}: ahora se pasan al registro para revisarlos`),
     registro: () => `${plural(r0.creado, "caso creado", "casos creados")} y ${plural(r0.actualizado, "completado", "completados")} en el registro`,
   }[t.tipo] || (() => ""))() : "";
   $(".tr-msg", el).textContent = t.error || final || t.mensaje || "";
   $(".tr-pct", el).textContent = t.activo || !t.error ? `${t.activo ? pct : 100}%` : "";
   $(".barra i", el).style.width = `${t.activo ? pct : t.error ? pct : 100}%`;
   $(".tr-tiempo", el).innerHTML = `${icono("reloj")} ${mmss(trans)}${t.activo ? " en marcha" : ""}`;
+  const enPaso = t.activo && t.paso_inicio ? Date.now() / 1000 - t.paso_inicio : 0;
+  $(".tr-paso", el).textContent = t.activo && t.tipo === "ia" ? `este paso: ${mmss(enPaso)}${t.detalle ? " · " + t.detalle : enPaso > 8 ? " · leyendo el informe…" : ""}` : "";
+  $(".tr-paso", el).classList.toggle("lento", enPaso > 90);
+  const bc = $("#bCancelar", el);
+  bc.classList.toggle("oculto", !(t.activo && t.cancelable));
+  bc.onclick = async () => { bc.disabled = true; try { await api("POST", "cancelar"); toast("Cancelando…", "info"); } catch (e) { toast(e.message, "mal"); } };
   $(".tr-eta", el).textContent = eta ? `≈ ${mmss(eta)} restantes` : t.total ? `${t.hecho} de ${t.total}` : "";
   const lineas = (t.lineas || []).slice(-14).reverse();
   const log = $(".tr-log", el);
@@ -389,16 +396,16 @@ function pintarTrabajo() {
   if (!t.activo && r) {
     if (t.tipo === "anonimizar") html = `<div class="chips"><span class="chip verde"><b>${r.listo}</b> listos</span><span class="chip ambar"><b>${r.revisar}</b> para revisar</span><span class="chip rojo"><b>${r.bloqueado}</b> bloqueados</span><span class="chip"><b>${r.nuevos}</b> pacientes nuevos</span></div>
       <div class="tr-botones"><button class="btn peq" data-r="resumen">${icono("libro")} Ver el resumen</button>${r.revisar ? `<button class="btn peq ambar" data-r="avisos">${icono("bandera")} Revisar avisos</button>` : ""}</div>`;
-    if (t.tipo === "ia") html = `<div class="chips"><span class="chip violeta"><b>${r.casos}</b> casos</span><span class="chip violeta"><b>${r.campos}</b> datos propuestos</span><span class="chip ambar"><b>${r.avisos}</b> con aviso</span><span class="chip">${icono("reloj")} ${mmss(r.segundos)}</span></div>
+    if (t.tipo === "ia") html = `<div class="chips">${r.estado === "cancelado" ? `<span class="chip rojo">Cancelado</span>` : ""}<span class="chip violeta"><b>${r.casos}</b> casos</span><span class="chip violeta"><b>${r.campos}</b> datos propuestos</span><span class="chip ambar"><b>${r.avisos}</b> con aviso</span>${r.incidencias ? `<span class="chip ambar" title="Respuestas que hubo que repetir (bucle o respuesta cortada). El detalle está en el registro.">${icono("aviso")} <b>${r.incidencias}</b> repeticiones</span>` : ""}<span class="chip">${icono("reloj")} ${mmss(r.segundos)}</span></div>
       ${r.errores?.length ? `<ul class="errores">${r.errores.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
-      <div class="tr-botones"><button class="btn peq" data-r="resumen">${icono("libro")} Ver el resumen</button></div>`;
+      <div class="tr-botones">${r.resumen ? `<button class="btn peq" data-r="resumen">${icono("libro")} Ver el resumen</button>` : ""}<button class="btn peq fantasma" data-r="registro_ia">${icono("historial")} Registro de la IA</button></div>`;
     if (t.tipo === "registro") html = `<div class="chips"><span class="chip verde"><b>${r.creado}</b> casos creados</span><span class="chip"><b>${r.actualizado}</b> completados</span><span class="chip gris"><b>${r.omitido}</b> no importados</span></div>
       <p class="sub">Cada dato de la IA queda marcado en el registro hasta que una persona lo revise.</p>
       <div class="tr-botones"><a class="btn peq" href="${esc(r.url)}/#/casos?ia=1" target="_blank" rel="noopener">${icono("registro")} Revisarlos en el registro</a></div>`;
   }
   if (res.innerHTML !== html) {
     res.innerHTML = html;
-    $$("[data-r]", res).forEach((b) => (b.onclick = () => (b.dataset.r === "avisos" ? irA("avisos") : abrir("resumen"))));
+    $$("[data-r]", res).forEach((b) => (b.onclick = () => (b.dataset.r === "avisos" ? irA("avisos") : abrir(b.dataset.r))));
   }
 }
 
@@ -413,7 +420,7 @@ function vigilar() {
       clearInterval(sondeo);
       await refrescar();
       if (S.trabajo.error) toast(S.trabajo.error, "mal");
-      else toast(`${S.trabajo.titulo}: terminado`);
+      else toast(S.trabajo.resultado?.estado === "cancelado" ? "Cancelado" : `${S.trabajo.titulo}: terminado`);
     }
   }, 600);
 }

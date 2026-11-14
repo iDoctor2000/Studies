@@ -22,8 +22,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(AQUI), "ia"))
 
 import ia_simulada  # noqa: E402
 import informes_sinteticos as S  # noqa: E402
-from cliente import ClienteIA, ErrorIA  # noqa: E402
-from extraer_ia import Extraccion, cita_en_informe, convertir, fecha_iso  # noqa: E402
+from cliente import Cancelado, ClienteIA, ErrorIA, RespuestaCortada  # noqa: E402
+from extraer_ia import Extraccion, cita_en_informe, convertir, ejecutar, fecha_iso  # noqa: E402
 from preguntas import cargar_preguntas  # noqa: E402
 from procesar_informes import buscar_pdfs, procesar  # noqa: E402
 
@@ -136,6 +136,54 @@ def main():
     ok(all(x not in enviado for x in ("ANTONIO", "FICTICIO", "100001", "CARM100000000001", "611223344", "Rosendo")),
        "a la IA solo le llega el texto anonimizado")
     ok(all(c["options"]["num_ctx"] >= 16384 and c["options"]["temperature"] == 0 for c in llamadas), "contexto amplio y temperatura 0")
+    ok(all(c["options"].get("num_predict", 0) > 0 and c["stream"] for c in llamadas), "cada respuesta tiene tope de longitud y se lee en directo")
+
+    print("\n4) Si la IA se atasca, el programa se recupera solo")
+    import threading
+    import time as _t
+    lineas = []
+    # a) bucle de relleno en la tanda que contiene la FEVI: se corta y se repite por mitades
+    ia_simulada.AVERIAS.update(bucle="echocardiography_lvef")
+    t0 = _t.time()
+    pb = Extraccion(ia, cargar_preguntas()).caso(1, por_caso[1], progreso=lineas.append)
+    ok(_t.time() - t0 < 30, f"un bucle sin fin se detecta y se corta en segundos ({_t.time() - t0:.1f} s)")
+    ok(pb["valores"].get("echocardiography_lvef") == 38 and pb["valores"].get("natriuretic_peptide_nt_probnp") == 3500,
+       "tras repetir la tanda en mitades, los datos se recuperan (FEVI 38, NT-proBNP 3500)")
+    ok(pb["incidencias"] >= 1 and any("se repite en dos mitades" in x for x in lineas), f"las repeticiones quedan anotadas ({pb['incidencias']})")
+    ok({k: v for k, v in pb["valores"].items()} == {k: v for k, v in p1["valores"].items()}, "el resultado es idéntico al de una IA sin averías")
+    ia_simulada.AVERIAS.update(bucle=None)
+    # b) respuesta cortada por tope de longitud (JSON a medias)
+    ia_simulada.AVERIAS.update(cortada="hypertension")
+    pc = Extraccion(ia, cargar_preguntas()).caso(1, por_caso[1], progreso=lambda *_: None)
+    ok(pc["valores"].get("hypertension") == 1 and pc["incidencias"] >= 1, "respuesta cortada a medias: se repite y se recupera")
+    ia_simulada.AVERIAS.update(cortada=None)
+    # d) registro en archivo y cancelación
+    ruta_log = os.path.join(tmp, "registro_ia.log")
+    ia_simulada.AVERIAS.update(bucle="echocardiography_lvef")
+    filas, _, estado = ejecutar(ia, sal, [(1, por_caso[1])], progreso=lambda *_: None, ruta_log=ruta_log)
+    ia_simulada.AVERIAS.update(bucle=None)
+    log = open(ruta_log, encoding="utf-8").read()
+    ok(estado == "ok" and filas[0]["incidencias"] >= 1, "ejecutar: caso terminado con incidencias contadas")
+    ok("FALLO: Respuesta cortada: bucle" in log and "tanda 6/7" in log and "caso terminado" in log and "tokens" in log,
+       "el registro dice en qué tanda falló, por qué, cuánto tardó y cuántos tokens")
+    ok(all(x not in log for x in ("ANTONIO", "FICTICIO", "CARM100000000001")), "el registro no lleva datos identificativos")
+    ia.cancelar = threading.Event()
+    ia_simulada.AVERIAS.update(lenta=0.05)
+    threading.Timer(0.6, ia.cancelar.set).start()
+    t0 = _t.time()
+    filas, _, estado = ejecutar(ia, sal, [(1, por_caso[1]), (2, por_caso[2])], progreso=lambda *_: None, ruta_log=ruta_log)
+    ia_simulada.AVERIAS.update(lenta=0)
+    ok(estado == "cancelado" and _t.time() - t0 < 5, f"«Cancelar» detiene la IA enseguida ({_t.time() - t0:.1f} s)")
+    ia.cancelar = None
+    try:
+        lento = ClienteIA(url, "simulada:1", tiempo_max=1)
+        ia_simulada.AVERIAS.update(lenta=0.7)
+        lento.preguntar("s", "INFORME:\n-----\nFEVI 38 %\n-----\n", {"type": "object", "properties": {"echocardiography_lvef": {"type": "object", "properties": {}}, "hypertension": {"type": "object", "properties": {}}}})
+        ok(False, "tope de tiempo por respuesta")
+    except RespuestaCortada as e:
+        ok("tiempo máximo" in str(e), "tope de tiempo por respuesta: se corta y avisa")
+    ia_simulada.AVERIAS.update(lenta=0)
+
     destino = sys.argv[1] if len(sys.argv) > 1 else None
     if destino:
         os.makedirs(destino, exist_ok=True)

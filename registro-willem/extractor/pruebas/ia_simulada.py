@@ -80,6 +80,13 @@ def contestar(usuario, esquema):
     return r
 
 
+# Averías provocadas para las pruebas:
+#   "bucle":   si la tanda trae ese código y más de 4 preguntas, rellena con espacios sin parar
+#   "cortada": si la tanda trae ese código y más de 2 preguntas, corta la respuesta a la mitad (tope de longitud)
+#   "lenta":   segundos de espera entre trozos (para probar «Cancelar»)
+AVERIAS = {"bucle": None, "cortada": None, "lenta": 0}
+
+
 class _Manejador(BaseHTTPRequestHandler):
     llamadas = []
 
@@ -99,20 +106,53 @@ class _Manejador(BaseHTTPRequestHandler):
             return self._json({"models": [{"name": "simulada:1"}]})
         self.send_error(404)
 
+    def _trozo(self, texto, **extra):
+        self.wfile.write((json.dumps({"message": {"role": "assistant", "content": texto}, "done": False, **extra}) + "\n").encode())
+        self.wfile.flush()
+
     def do_POST(self):
+        import time
         b = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         _Manejador.llamadas.append(b)
         usuario = b["messages"][-1]["content"]
-        self._json({"message": {"role": "assistant", "content": json.dumps(contestar(usuario, b["format"]), ensure_ascii=False)}})
+        props = (b.get("format") or {}).get("properties", {})
+        respuesta = json.dumps(contestar(usuario, b["format"]), ensure_ascii=False)
+        if not b.get("stream"):
+            return self._json({"message": {"role": "assistant", "content": respuesta}, "done": True, "done_reason": "stop"})
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson")
+        self.end_headers()
+        try:
+            if AVERIAS["bucle"] in props and len(props) > 4:
+                self._trozo('{"' + AVERIAS["bucle"] + '": {"valor": null, "cita": "')
+                for _ in range(20000):  # relleno sin fin hasta que el cliente corte
+                    self._trozo("          ")
+                return
+            cortar = AVERIAS["cortada"] in props and len(props) > 2
+            if cortar:
+                respuesta = respuesta[:len(respuesta) // 2]
+            for i in range(0, len(respuesta), 40):
+                self._trozo(respuesta[i:i + 40])
+                if AVERIAS["lenta"]:
+                    time.sleep(AVERIAS["lenta"])
+            self.wfile.write((json.dumps({"message": {"role": "assistant", "content": ""}, "done": True,
+                                          "done_reason": "length" if cortar else "stop", "eval_count": len(respuesta) // 4,
+                                          "prompt_eval_count": len(usuario) // 4}) + "\n").encode())
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # el cliente ha cortado (bucle detectado o cancelación)
 
 
 def arrancar(puerto=0):
     srv = ThreadingHTTPServer(("127.0.0.1", puerto), _Manejador)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
+    srv.daemon_threads = True
     return srv, f"http://127.0.0.1:{srv.server_address[1]}", _Manejador.llamadas
 
 
 if __name__ == "__main__":
+    import os
+    AVERIAS.update(bucle=os.environ.get("SIM_BUCLE") or None, cortada=os.environ.get("SIM_CORTADA") or None,
+                   lenta=float(os.environ.get("SIM_LENTA") or 0))
     srv, url, _ = arrancar(11435)
     print("IA simulada en", url)
     threading.Event().wait()

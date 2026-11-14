@@ -318,3 +318,8 @@ main { max-width: 1380px; margin: 0 auto; padding: 28px 32px 30px; }
 code.huella { display: block; padding: 10px 12px; font-size: 12px; line-height: 1.6; word-break: break-all; }
 .aviso-rojo { display: flex; gap: 8px; color: var(--bad); background: var(--bad-soft); padding: 10px 12px; border-radius: 12px; }
 .campo input.cod { font: 600 22px var(--mono); letter-spacing: .25em; text-align: center; }
+
+/* Latido de la IA y cancelar */
+.tr-paso { color: var(--ink-2); font-weight: 600; }
+.tr-paso.lento { color: var(--warn); }
+.tr-cab #bCancelar { flex: none; }

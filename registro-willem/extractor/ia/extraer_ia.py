@@ -31,7 +31,7 @@ import unicodedata
 
 AQUI = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, AQUI)
-from cliente import ClienteIA, ErrorIA  # noqa: E402
+from cliente import Cancelado, ClienteIA, ErrorConexion, ErrorIA, RespuestaCortada  # noqa: E402
 from preguntas import (DIAG, ESQUEMA_DIAGNOSTICOS, ESQUEMA_REINGRESO, NOMBRE_DIAG, cargar_preguntas,  # noqa: E402
                        describir, esquema_lote, lotes, preguntables)
 
@@ -201,22 +201,58 @@ def informe_para_ia(inf):
 
 
 class Extraccion:
-    def __init__(self, cliente, items):
+    def __init__(self, cliente, items, registro=None):
         self.ia = cliente
         self.items = items
         self.por_codigo = {it["codigo"]: it for it in items}
+        self.registro = registro or (lambda linea: None)  # función que anota una línea en el registro
+        self.incidencias = 0
 
-    def _preguntar(self, informe, preguntas, esquema):
+    def _preguntar(self, informe, preguntas, esquema, max_tokens=2048, etiqueta=""):
         usuario = (f"INFORME (anonimizado):\n-----\n{informe_para_ia(informe)}\n-----\n\n"
                    f"PREGUNTAS. Devuelve un objeto JSON con una clave por cada código:\n{preguntas}")
-        return self.ia.preguntar(SISTEMA, usuario, esquema)
+        try:
+            r = self.ia.preguntar(SISTEMA, usuario, esquema, max_tokens=max_tokens)
+        except ErrorIA as e:
+            u = self.ia.ultima
+            cola = repr((getattr(e, "texto", "") or "")[-160:])
+            self.registro(f"{etiqueta} · FALLO: {e} · {u.get('segundos', '?')} s · {u.get('tokens', '?')} tokens (tope {max_tokens})"
+                          + (f" · final de la respuesta: {cola}" if getattr(e, "texto", "") else ""))
+            raise
+        u = self.ia.ultima
+        self.registro(f"{etiqueta} · bien · {u.get('segundos', '?')} s · {u.get('tokens', '?')} tokens (tope {max_tokens})"
+                      + (f" · informe+preguntas: {u['tokens_entrada']} tokens" if u.get("tokens_entrada") else ""))
+        return r
+
+    def _lote(self, informe, lote, descartadas, progreso, etiqueta):
+        """Pregunta una tanda. Si la respuesta se corta (bucle, tope, JSON roto), la repite partida en dos mitades."""
+        try:
+            return self._preguntar(informe, "\n".join(describir(it) for it in lote), esquema_lote(lote),
+                                   max_tokens=300 + 170 * len(lote), etiqueta=f"{etiqueta} ({len(lote)} preguntas)")
+        except (Cancelado, ErrorConexion):
+            raise
+        except ErrorIA as e:
+            self.incidencias += 1
+            if len(lote) == 1:
+                descartadas.append({"codigo": lote[0]["codigo"], "motivo": f"La IA no pudo contestar: {e}"})
+                return {}
+            progreso(f"      ↳ {e}: se repite en dos mitades")
+            m = len(lote) // 2
+            r = self._lote(informe, lote[:m], descartadas, progreso, etiqueta + "a")
+            r.update(self._lote(informe, lote[m:], descartadas, progreso, etiqueta + "b"))
+            return r
 
     def diagnosticos(self, informe):
         lista = "\n".join(f"- {k}: {v}" for k, v in NOMBRE_DIAG.items())
-        r = self._preguntar(informe, "¿Cuáles de estas cardiopatías tiene diagnosticadas el paciente según el informe "
-                            "(como diagnóstico del ingreso o como antecedente)? Incluye solo las que estén escritas. "
-                            "Para OTRO, indica en «texto» cuál es. En «principal», la que motivó este ingreso "
-                            f"(si es una de la lista):\n{lista}", ESQUEMA_DIAGNOSTICOS)
+        pregunta = ("¿Cuáles de estas cardiopatías tiene diagnosticadas el paciente según el informe "
+                    "(como diagnóstico del ingreso o como antecedente)? Incluye solo las que estén escritas. "
+                    "Para OTRO, indica en «texto» cuál es. En «principal», la que motivó este ingreso "
+                    f"(si es una de la lista):\n{lista}")
+        try:
+            r = self._preguntar(informe, pregunta, ESQUEMA_DIAGNOSTICOS, max_tokens=900, etiqueta="diagnósticos")
+        except RespuestaCortada:  # un segundo intento antes de dar el caso por fallido
+            self.incidencias += 1
+            r = self._preguntar(informe, pregunta, ESQUEMA_DIAGNOSTICOS, max_tokens=1500, etiqueta="diagnósticos (2º intento)")
         out, vistos = [], set()
         for d in r.get("diagnosticos") or []:
             g = d.get("codigo")
@@ -234,6 +270,7 @@ class Extraccion:
         informes = sorted(informes, key=lambda i: i.get("fecha_ingreso") or "")
         indice, reingresos = informes[0], informes[1:]
         t0 = time.time()
+        self.incidencias = 0
         progreso(f"    diagnósticos…")
         diags = self.diagnosticos(indice)
         codigos_diag = [d["codigo"] for d in diags]
@@ -252,11 +289,7 @@ class Extraccion:
         tandas = lotes(basales)
         for i, lote in enumerate(tandas, 1):
             progreso(f"    tanda {i}/{len(tandas)} · {lote[0]['pestana']} ({len(lote)} preguntas)…")
-            try:
-                r = self._preguntar(indice, "\n".join(describir(it) for it in lote), esquema_lote(lote))
-            except ErrorIA as e:
-                descartadas.append({"codigo": "(tanda)", "motivo": str(e)})
-                continue
+            r = self._lote(indice, lote, descartadas, progreso, f"tanda {i}/{len(tandas)}")
             for it in lote:
                 conv = convertir(it, r.get(it["codigo"]), indice)
                 if not conv:
@@ -284,6 +317,7 @@ class Extraccion:
             "generado": dt.datetime.now().replace(microsecond=0).isoformat(),
             "modelo": {"proveedor": self.ia.proveedor, "nombre": self.ia.modelo},
             "segundos": round(time.time() - t0, 1),
+            "incidencias": self.incidencias,
             "diagnosticos": diags,
             "informes": [{"fecha_ingreso": i.get("fecha_ingreso"), "fecha_alta": i.get("fecha_alta"), "servicio": i.get("servicio"),
                           "titulo": i.get("titulo"), "texto": i["texto"], "indice": n == 0} for n, i in enumerate(informes)],
@@ -299,8 +333,12 @@ class Extraccion:
             try:
                 r = self._preguntar(inf, "- por_insuficiencia_cardiaca: ¿el motivo principal de ESTE ingreso es la insuficiencia cardiaca? [1/0]\n"
                                     "- fallecimiento: ¿el paciente falleció durante este ingreso (alta por exitus)? [1/0]\n"
-                                    "- cita: frase literal del informe que lo justifica", ESQUEMA_REINGRESO)
+                                    "- cita: frase literal del informe que lo justifica", ESQUEMA_REINGRESO,
+                                    max_tokens=400, etiqueta=f"reingreso {inf.get('fecha_ingreso')}")
+            except (Cancelado, ErrorConexion):
+                raise
             except ErrorIA:
+                self.incidencias += 1
                 continue
             (hf if r.get("por_insuficiencia_cardiaca") == 1 else no_hf).append((inf, r.get("cita") or ""))
             if r.get("fallecimiento") == 1:
@@ -397,24 +435,54 @@ def pasos(casos, n_tandas):
     return sum(1 + n_tandas + (1 if len(infs) > 1 else 0) for _, infs in casos)
 
 
-def ejecutar(ia, salida, casos, progreso=print, al_caso=None):
-    """Extrae los casos indicados y guarda las propuestas. Devuelve (filas, ruta_resumen)."""
-    ext = Extraccion(ia, cargar_preguntas())
+def ejecutar(ia, salida, casos, progreso=print, al_caso=None, ruta_log=None):
+    """Extrae los casos indicados y guarda las propuestas. Devuelve (filas, ruta_resumen, estado).
+
+    estado: "ok", "cancelado" o "sin_conexion". Cada llamada a la IA se anota en el registro (ruta_log)."""
     destino = os.path.join(salida, "propuestas_ia")
     os.makedirs(destino, exist_ok=True)
-    filas = []
+    ruta_log = ruta_log or os.path.join(destino, "registro_ia.log")
+    numero_actual = [None]
+
+    def anotar(linea):
+        try:
+            with open(ruta_log, "a", encoding="utf-8") as f:
+                quien = f"caso {numero_actual[0]} · " if numero_actual[0] is not None else ""
+                f.write(f"{dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} · {quien}{linea}\n")
+        except OSError:
+            pass
+    ext = Extraccion(ia, cargar_preguntas(), registro=anotar)
+    anotar(f"=== Inicio: {len(casos)} caso(s) · modelo {ia.modelo} · tope de {ia.tiempo_max} s por respuesta ===")
+    filas, estado = [], "ok"
     for numero, informes in casos:
+        numero_actual[0] = numero
         progreso(f"  Caso {numero} ({len(informes)} informe(s))")
-        fila = {"numero": numero, "informes": len(informes), "diags": [], "campos": 0, "avisos": 0, "segundos": 0}
+        fila = {"numero": numero, "informes": len(informes), "diags": [], "campos": 0, "avisos": 0, "segundos": 0, "incidencias": 0}
         try:
             prop = ext.caso(numero, informes, progreso=progreso)
+            fila["incidencias"] = prop.get("incidencias", 0)
+            anotar(f"caso terminado: {len(prop['ia'])} datos, {prop['segundos']} s, {prop.get('incidencias', 0)} incidencia(s), "
+                   f"{len(prop['descartadas'])} descartado(s)")
             with open(os.path.join(destino, f"caso_{numero:04d}.json"), "w", encoding="utf-8") as f:
                 json.dump(prop, f, ensure_ascii=False, indent=1)
             fila.update(diags=[d["codigo"] for d in prop["diagnosticos"]], campos=len(prop["ia"]),
                         avisos=sum(1 for x in prop["ia"].values() if x["aviso"]), segundos=prop["segundos"])
             progreso(f"    → {fila['campos']} campos propuestos ({fila['avisos']} con aviso) en {fila['segundos']:.0f} s")
+        except Cancelado:
+            estado = "cancelado"
+            anotar("CANCELADO por el usuario")
+            progreso("    ✗ Cancelado (los casos ya terminados se conservan)")
+            break
+        except ErrorConexion as e:
+            estado = "sin_conexion"
+            fila["error"] = str(e)
+            filas.append(fila)
+            anotar(f"SIN CONEXIÓN con la IA: {e}")
+            progreso(f"    ✗ {e}")
+            break
         except ErrorIA as e:
             fila["error"] = str(e)
+            anotar(f"CASO FALLIDO: {e}")
             progreso(f"    ✗ {e}")
         filas.append(fila)
         if al_caso:
@@ -424,7 +492,7 @@ def ejecutar(ia, salida, casos, progreso=print, al_caso=None):
         ruta_html = os.path.join(destino, f"resumen_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
         with open(ruta_html, "w", encoding="utf-8") as f:
             f.write(resumen_html(filas, destino))
-    return filas, ruta_html
+    return filas, ruta_html, estado
 
 
 def comprobar_modelo(ia):
@@ -459,9 +527,10 @@ def main():
     if not casos:
         print("  No hay casos nuevos que procesar (use --rehacer para repetir los que ya tienen propuesta).")
         return
-    filas, ruta_html = ejecutar(ia, a.salida, casos)
-    print(f"\nPropuestas en: {os.path.join(a.salida, 'propuestas_ia')}\nResumen: {ruta_html}")
-    if a.abrir and platform.system() == "Darwin":
+    filas, ruta_html, estado = ejecutar(ia, a.salida, casos)
+    print(f"\nPropuestas en: {os.path.join(a.salida, 'propuestas_ia')}\nResumen: {ruta_html}"
+          f"\nRegistro de la IA: {os.path.join(a.salida, 'propuestas_ia', 'registro_ia.log')}")
+    if a.abrir and ruta_html and platform.system() == "Darwin":
         subprocess.run(["open", ruta_html])
 
 
