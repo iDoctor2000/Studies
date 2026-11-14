@@ -1,0 +1,9 @@
+# Al contenedor del NAS solo van servidor.py, demo.py, web/ y diccionario/
+*
+!servidor.py
+!demo.py
+!web/
+!diccionario/
+**/__pycache__
+**/*.sqlite
+**/*.db

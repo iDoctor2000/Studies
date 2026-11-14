@@ -180,9 +180,11 @@ function pintarEstados() {
     eq.filevault === true ? pill("ok", "escudo", "Disco cifrado", "FileVault está activado")
       : eq.filevault === false ? pill("mal", "escudo", "FileVault apagado", "Actívelo en Ajustes del Sistema → Privacidad y seguridad → FileVault")
         : pill("gris", "escudo", "FileVault: no es un Mac", "Esta comprobación solo funciona en macOS"),
-    rg.ok ? pill("ok", "registro", "Registro conectado", rg.url) : pill("gris", "registro", "Registro cerrado", `Pulse para abrir el registro (${rg.url})`, 'data-acc="registro"'),
+    rg.ok ? pill("ok", rg.https ? "candado" : "registro", rg.https ? "Registro (cifrado)" : "Registro conectado", rg.url)
+      : rg.certificado ? pill(rg.cambiado ? "mal" : "aviso", "candado", rg.cambiado ? "¡Certificado cambiado!" : "Confirmar certificado", "Pulse para revisarlo", 'data-acc="certificado"')
+        : pill("gris", "registro", "Registro cerrado", `Pulse para abrir el registro (${rg.url})`, 'data-acc="registro"'),
   ].join("");
-  $$("#estados [data-acc]").forEach((b) => (b.onclick = () => (b.dataset.acc === "ollama" ? arrancarOllama() : arrancarRegistro())));
+  $$("#estados [data-acc]").forEach((b) => (b.onclick = () => (b.dataset.acc === "ollama" ? arrancarOllama() : b.dataset.acc === "certificado" ? confiarCertificado() : arrancarRegistro())));
   $$("#estados [data-ir]").forEach((b) => (b.onclick = () => irA(b.dataset.ir)));
   const c = e.cuentas;
   const cuenta = { avisos: c.pendientes, llave: c.llave };
@@ -194,6 +196,19 @@ async function arrancarOllama() {
   try { const r = await api("POST", "ollama"); toast(r.mensaje, r.ok ? "ok" : "mal"); } catch (e) { toast(e.message, "mal"); }
   setTimeout(refrescar, 2500);
 }
+async function confiarCertificado() {
+  const rg = S.estado.registro;
+  const ok = await modal({
+    titulo: rg.cambiado ? "El certificado del registro ha cambiado" : "Certificado propio del NAS", aceptar: "Confiar en este certificado", peligro: !!rg.cambiado,
+    html: `${rg.cambiado ? `<p class="aviso-rojo">${icono("aviso")}<span>El NAS presenta un certificado <b>distinto</b> del que se confirmó. Si nadie lo ha renovado, <b>no continúe</b>: podría ser un equipo que se hace pasar por el NAS.</span></p>`
+      : `<p>El registro en <b>${esc(rg.url)}</b> usa un certificado propio del NAS (no de una autoridad pública). Es normal en un NAS de casa.</p>`}
+      <p>Huella del certificado (SHA-256):</p><code class="huella">${esc(rg.certificado)}</code>
+      <p class="sub">Para estar seguro, compárela con la que muestra el navegador al abrir el registro del NAS (pulse el candado de la barra de direcciones → certificado → huella digital SHA-256). A partir de ahora, la estación solo hablará con el NAS si presenta exactamente este certificado.</p>`,
+    alAceptar: async () => { await api("POST", "confiar", { huella: rg.huella }); },
+  });
+  if (ok) { toast("Certificado confirmado: conexión cifrada con el registro"); refrescar(); }
+}
+
 async function arrancarRegistro() {
   toast("Abriendo el registro…", "info");
   try { const r = await api("POST", "registro/arrancar"); toast(r.mensaje, r.ok ? "ok" : "mal"); } catch (e) { toast(e.message, "mal"); }
@@ -247,8 +262,10 @@ function pasos() {
       boton: `<button class="btn ia" data-acc="ia" ${ocupado || (!c.sin_ia && !(S.rehacer && c.casos_listos)) || !e.ia.ok ? "disabled" : ""}>${icono("chispa")} Rellenar con IA</button>`,
       estado: corriendo("ia") ? "trabajando" : c.propuestas && !c.sin_ia ? "listo" : "" },
     { k: "registro", color: "#e11d48", ic: "enviar", n: c.sin_pasar, tit: "Propuestas por pasar",
-      desc: e.registro.ok ? `Destino: ${esc(e.registro.url.replace(/^https?:\/\//, ""))}` : "El registro no está abierto",
+      desc: e.registro.ok ? `Destino: ${esc(e.registro.url.replace(/^https?:\/\//, ""))}${e.registro.https ? ` · ${icono("candado")} cifrado` : ""}${e.registro.doble_factor ? " · doble factor" : ""}`
+        : e.registro.certificado ? "Confirme el certificado del NAS antes de enviar nada" : "El registro no está abierto",
       boton: e.registro.ok ? `<button class="btn rosa" data-acc="registro" ${ocupado || !c.sin_pasar ? "disabled" : ""}>${icono("enviar")} Pasar al registro</button>`
+        : e.registro.certificado ? `<button class="btn ambar" data-acc="certificado">${icono("candado")} Revisar el certificado</button>`
         : `<button class="btn" data-acc="abrirRegistro">${icono("registro")} Abrir el registro</button>`,
       estado: corriendo("registro") ? "trabajando" : c.propuestas && !c.sin_pasar ? "listo" : "" },
   ];
@@ -410,6 +427,7 @@ async function accion(a) {
     }
     if (a === "avisos") return irA("avisos");
     if (a === "abrirRegistro") return arrancarRegistro();
+    if (a === "certificado") return confiarCertificado();
     if (a === "anonimizar") { await api("POST", "anonimizar"); }
     if (a === "ia") { await api("POST", "ia", { rehacer: S.rehacer }); }
     if (a === "registro") {
@@ -418,9 +436,10 @@ async function accion(a) {
         html: `<p>Se enviarán <b>${plural(S.estado.cuentas.sin_pasar, "propuesta", "propuestas")}</b> de la IA (anonimizadas) a <b>${esc(S.estado.registro.url)}</b>.</p>
           <label class="campo"><span>Usuario del registro (data manager)</span><input id="rUsu" autocomplete="username" value="${esc(S.estado.ajustes.usuario_registro || "")}"></label>
           <label class="campo"><span>Contraseña</span><input id="rCla" type="password" autocomplete="current-password"></label>
+          ${S.estado.registro.doble_factor ? `<label class="campo"><span>Código de 6 cifras del móvil</span><input id="rCod" inputmode="numeric" autocomplete="one-time-code" maxlength="9" placeholder="000 000" class="cod"></label>` : ""}
           <p class="sub">${icono("candado")} La contraseña no se guarda en ningún sitio.</p>`,
         alAbrir: (m) => { if ($("#rUsu", m).value) setTimeout(() => $("#rCla", m).focus(), 30); },
-        alAceptar: async (m) => { await api("POST", "registro", { usuario: $("#rUsu", m).value, clave: $("#rCla", m).value }); },
+        alAceptar: async (m) => { await api("POST", "registro", { usuario: $("#rUsu", m).value, clave: $("#rCla", m).value, codigo: ($("#rCod", m)?.value || "").replace(/\s/g, "") }); },
       });
       if (!ok) return;
     }

@@ -12,6 +12,7 @@ Servidor web LOCAL. Solo usa la biblioteca estándar de Python (no hay que insta
 Ningún dato sale de este ordenador: no hay conexión a internet ni a servicios externos.
 """
 import argparse
+import base64
 import csv
 import datetime as dt
 import hashlib
@@ -23,9 +24,12 @@ import os
 import re
 import secrets
 import sqlite3
+import ssl
 import sys
 import threading
+import time
 import webbrowser
+from urllib.parse import quote
 import xml.etree.ElementTree as ET
 import zipfile
 from contextlib import contextmanager
@@ -45,7 +49,7 @@ mimetypes.add_type("text/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
 mimetypes.add_type("image/svg+xml", ".svg")
 
-CFG = {"db": None, "llave": None, "demo": False}
+CFG = {"db": None, "llave": None, "demo": False, "nas": False, "2fa": False, "https": False}
 LOCK = threading.Lock()
 
 
@@ -222,9 +226,45 @@ def iniciar_db():
             con.execute("ALTER TABLE casos ADD COLUMN ia TEXT NOT NULL DEFAULT '{}'")
         if "informes" not in cols:
             con.execute("ALTER TABLE casos ADD COLUMN informes TEXT NOT NULL DEFAULT '[]'")
+        # Doble factor (TOTP) y bloqueo por intentos fallidos
+        cols_u = [r[1] for r in con.execute("PRAGMA table_info(usuarios)")]
+        for col, tipo in (("totp", "TEXT"), ("totp_ultimo", "INTEGER"), ("recuperacion", "TEXT"),
+                          ("fallos", "INTEGER NOT NULL DEFAULT 0"), ("bloqueado_hasta", "TEXT")):
+            if col not in cols_u:
+                con.execute(f"ALTER TABLE usuarios ADD COLUMN {col} {tipo}")
+
+
+def copia_de_seguridad(carpeta, conservar=14):
+    """Copia coherente de la base (API de copia de SQLite, válida con el registro en uso). Guarda las últimas `conservar`."""
+    os.makedirs(carpeta, exist_ok=True)
+    destino = os.path.join(carpeta, f"registro_{dt.date.today().isoformat()}.sqlite")
+    origen = sqlite3.connect(CFG["db"], timeout=30)
+    copia = sqlite3.connect(destino + ".tmp")
+    try:
+        with copia:
+            origen.backup(copia)
+    finally:
+        copia.close()
+        origen.close()
+    os.replace(destino + ".tmp", destino)
+    copias = sorted(f for f in os.listdir(carpeta) if re.fullmatch(r"registro_\d{4}-\d{2}-\d{2}\.sqlite", f))
+    for viejo in copias[:-conservar]:
+        os.remove(os.path.join(carpeta, viejo))
+    return destino
+
+
+def copias_diarias(carpeta):
+    while True:
+        try:
+            print(f"  Copia de seguridad: {copia_de_seguridad(carpeta)}")
+        except Exception as e:  # nunca debe tumbar el servidor
+            print(f"  AVISO: no se pudo hacer la copia de seguridad ({e})")
+        time.sleep(24 * 3600)
 
 
 def llave_db():
+    if CFG["nas"]:
+        return None  # en el NAS no hay libro llave: solo existe en el Mac
     ruta = CFG["llave"]
     carpeta = os.path.dirname(ruta)
     if not os.path.isdir(carpeta):
@@ -250,6 +290,62 @@ def hash_pw(pw, sal=None):
 def comprobar_pw(pw, guardado):
     sal, _ = guardado.split("$", 1)
     return hmac.compare_digest(hash_pw(pw, sal), guardado)
+
+
+# ===========================================================================
+#  Doble factor (TOTP, RFC 6238: Google Authenticator, Microsoft Authenticator...)
+# ===========================================================================
+EMISOR_2FA = "WILLEM Arrixaca"
+DESAFIOS = {}  # token -> {usuario_id, tipo: "codigo"|"alta", secreto, expira}
+INTENTOS_IP = {}  # ip -> [instantes de fallos]
+MAX_FALLOS_USUARIO, MAX_FALLOS_IP, MINUTOS_BLOQUEO = 5, 20, 15
+
+
+def nuevo_secreto_totp():
+    return base64.b32encode(secrets.token_bytes(20)).decode().rstrip("=")
+
+
+def totp(secreto, paso=None, digitos=6, periodo=30):
+    clave = base64.b32decode(secreto.upper() + "=" * (-len(secreto) % 8))
+    n = int(time.time() // periodo) if paso is None else paso
+    h = hmac.new(clave, n.to_bytes(8, "big"), hashlib.sha1).digest()
+    o = h[-1] & 15
+    return str((int.from_bytes(h[o:o + 4], "big") & 0x7FFFFFFF) % 10 ** digitos).zfill(digitos)
+
+
+def comprobar_totp(secreto, codigo, ultimo=None):
+    """Devuelve el paso de tiempo válido (admite ±30 s de desfase) o None. Un código no se puede reutilizar."""
+    codigo = re.sub(r"\s", "", codigo or "")
+    if not re.fullmatch(r"\d{6}", codigo):
+        return None
+    ahora_paso = int(time.time() // 30)
+    for paso in (ahora_paso - 1, ahora_paso, ahora_paso + 1):
+        if hmac.compare_digest(totp(secreto, paso), codigo):
+            return paso if (ultimo is None or paso > ultimo) else -1  # -1: código correcto pero ya usado
+    return None
+
+
+def uri_totp(usuario, secreto):
+    return (f"otpauth://totp/{quote(EMISOR_2FA)}:{quote(usuario)}?secret={secreto}&issuer={quote(EMISOR_2FA)}"
+            "&algorithm=SHA1&digits=6&period=30")
+
+
+def codigos_recuperacion(n=8):
+    letras = "abcdefghjkmnpqrstuvwxyz23456789"
+    return ["".join(secrets.choice(letras) for _ in range(4)) + "-" + "".join(secrets.choice(letras) for _ in range(4)) for _ in range(n)]
+
+
+def hash_recuperacion(codigo, usuario_id):
+    return hashlib.sha256(f"{usuario_id}:{codigo.strip().lower()}".encode()).hexdigest()
+
+
+def nuevo_desafio(usuario_id, tipo, secreto=None):
+    tok = secrets.token_urlsafe(24)
+    with LOCK:
+        for k in [k for k, d in DESAFIOS.items() if d["expira"] < time.time()]:
+            DESAFIOS.pop(k, None)
+        DESAFIOS[tok] = {"usuario_id": usuario_id, "tipo": tipo, "secreto": secreto, "expira": time.time() + 300}
+    return tok
 
 
 def caso_a_dict(r, con_valores=True, con_informes=False):
@@ -606,6 +702,13 @@ class Manejador(BaseHTTPRequestHandler):
             sys.stderr.write("  %s  %s\n" % (dt.datetime.now().strftime("%H:%M:%S"), args[0]))
 
     # ---- utilidades -------------------------------------------------------
+    def end_headers(self):
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if CFG["https"] or CFG["nas"]:
+            self.send_header("Strict-Transport-Security", "max-age=31536000")
+        super().end_headers()
+
     def _json(self, obj, code=200, headers=None):
         data = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
@@ -705,7 +808,8 @@ class Manejador(BaseHTTPRequestHandler):
         with db() as con:
             n = con.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0]
         u = self._usuario(obligatorio=False)
-        self._json({"necesita_configuracion": n == 0, "demo": CFG["demo"], "centro": SITE_ID,
+        self._json({"necesita_configuracion": n == 0, "demo": CFG["demo"], "centro": SITE_ID, "nas": CFG["nas"],
+                    "doble_factor": CFG["2fa"],
                     "usuario": dict(id=u["id"], usuario=u["usuario"], nombre=u["nombre"], rol=u["rol"]) if u else None})
 
     def api_post_configurar(self, p, q):
@@ -727,18 +831,103 @@ class Manejador(BaseHTTPRequestHandler):
             if len(b.get("clave") or "") < 8:
                 raise Error(400, "La contraseña debe tener al menos 8 caracteres")
 
+    # -- protección frente a intentos repetidos
+    def _ip(self):
+        if CFG["nas"]:  # detrás del proxy inverso del NAS
+            xff = (self.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+            if xff:
+                return xff
+        return self.client_address[0]
+
+    def _comprobar_ip(self):
+        ip, t = self._ip(), time.time()
+        with LOCK:
+            fallos = [x for x in INTENTOS_IP.get(ip, []) if x > t - MINUTOS_BLOQUEO * 60]
+            INTENTOS_IP[ip] = fallos
+        if len(fallos) >= MAX_FALLOS_IP:
+            raise Error(429, f"Demasiados intentos desde este equipo: espere {MINUTOS_BLOQUEO} minutos")
+
+    def _fallo(self, con, u=None):
+        with LOCK:
+            INTENTOS_IP.setdefault(self._ip(), []).append(time.time())
+        if u is not None:
+            n = (u["fallos"] or 0) + 1
+            hasta = (dt.datetime.now() + dt.timedelta(minutes=MINUTOS_BLOQUEO)).isoformat(timespec="seconds") if n >= MAX_FALLOS_USUARIO else None
+            con.execute("UPDATE usuarios SET fallos=?, bloqueado_hasta=? WHERE id=?", (0 if hasta else n, hasta, u["id"]))
+            con.commit()
+
+    def _bloqueado(self, u):
+        if u["bloqueado_hasta"] and u["bloqueado_hasta"] > ahora():
+            raise Error(429, f"Usuario bloqueado por demasiados intentos: espere {MINUTOS_BLOQUEO} minutos o pida a un data manager que lo revise")
+
+    def _abrir_sesion(self, con, u, extra=None):
+        tok = secrets.token_urlsafe(32)
+        exp = (dt.datetime.now() + dt.timedelta(hours=SESION_HORAS)).isoformat(timespec="seconds")
+        con.execute("DELETE FROM sesiones WHERE expira<?", (ahora(),))
+        con.execute("INSERT INTO sesiones VALUES(?,?,?)", (tok, u["id"], exp))
+        con.execute("UPDATE usuarios SET fallos=0, bloqueado_hasta=NULL WHERE id=?", (u["id"],))
+        con.commit()  # antes de responder: la siguiente petición ya debe encontrar la sesión
+        segura = "; Secure" if (CFG["https"] or CFG["nas"]) else ""
+        self._json({"ok": True, **(extra or {})},
+                   headers={"Set-Cookie": f"willem_sid={tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESION_HORAS * 3600}{segura}"})
+
     def api_post_login(self, p, q):
+        """Paso 1: usuario y contraseña. Paso 2 (/login/codigo): código del doble factor.
+        Alta del doble factor (/login/activar): primer código de la aplicación del móvil."""
+        self._comprobar_ip()
         b = self._cuerpo()
+        paso = p[0] if p else ""
         with db() as con:
+            if paso in ("codigo", "activar"):
+                d = DESAFIOS.get(b.get("desafio") or "")
+                if not d or d["expira"] < time.time() or d["tipo"] != {"codigo": "codigo", "activar": "alta"}[paso]:
+                    raise Error(401, "La verificación ha caducado: vuelva a escribir su usuario y contraseña")
+                u = con.execute("SELECT * FROM usuarios WHERE id=? AND activo=1", (d["usuario_id"],)).fetchone()
+                if not u:
+                    raise Error(401, "Usuario no válido")
+                self._bloqueado(u)
+                codigo = (b.get("codigo") or "").strip()
+                if paso == "activar":
+                    pasos = comprobar_totp(d["secreto"], codigo)
+                    if pasos is None or pasos < 0:
+                        self._fallo(con, u)
+                        raise Error(401, "El código no es correcto. Compruebe la hora del móvil y escriba el código que aparece ahora")
+                    rec = codigos_recuperacion()
+                    con.execute("UPDATE usuarios SET totp=?, totp_ultimo=?, recuperacion=? WHERE id=?",
+                                (d["secreto"], pasos, json.dumps([hash_recuperacion(c, u["id"]) for c in rec]), u["id"]))
+                    DESAFIOS.pop(b.get("desafio"), None)
+                    con.execute("INSERT INTO auditoria(numero,usuario,fecha,campo,antes,despues,origen) VALUES(?,?,?,?,?,?,?)",
+                                (None, u["usuario"], ahora(), "(doble factor activado)", None, None, "formulario"))
+                    return self._abrir_sesion(con, u, {"recuperacion": rec})
+                pasos = comprobar_totp(u["totp"], codigo, u["totp_ultimo"])
+                if pasos == -1:
+                    raise Error(401, "Ese código ya se ha usado: espere a que la aplicación muestre el siguiente (cambia cada 30 segundos)")
+                if pasos is not None:
+                    con.execute("UPDATE usuarios SET totp_ultimo=? WHERE id=?", (pasos, u["id"]))
+                else:
+                    lista = json.loads(u["recuperacion"] or "[]")
+                    h = hash_recuperacion(codigo, u["id"])
+                    if h not in lista:
+                        self._fallo(con, u)
+                        raise Error(401, "Código incorrecto")
+                    lista.remove(h)  # cada código de recuperación sirve una sola vez
+                    con.execute("UPDATE usuarios SET recuperacion=? WHERE id=?", (json.dumps(lista), u["id"]))
+                DESAFIOS.pop(b.get("desafio"), None)
+                return self._abrir_sesion(con, u)
             u = con.execute("SELECT * FROM usuarios WHERE usuario=? AND activo=1",
                             ((b.get("usuario") or "").strip().lower(),)).fetchone()
+            if u:
+                self._bloqueado(u)
             if not u or not comprobar_pw(b.get("clave") or "", u["hash"]):
+                self._fallo(con, u)
                 raise Error(401, "Usuario o contraseña incorrectos")
-            tok = secrets.token_urlsafe(32)
-            exp = (dt.datetime.now() + dt.timedelta(hours=SESION_HORAS)).isoformat(timespec="seconds")
-            con.execute("DELETE FROM sesiones WHERE expira<?", (ahora(),))
-            con.execute("INSERT INTO sesiones VALUES(?,?,?)", (tok, u["id"], exp))
-        self._json({"ok": True}, headers={"Set-Cookie": f"willem_sid={tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESION_HORAS * 3600}"})
+            if u["totp"]:
+                return self._json({"paso": "codigo", "desafio": nuevo_desafio(u["id"], "codigo")})
+            if CFG["2fa"]:
+                sec = nuevo_secreto_totp()
+                return self._json({"paso": "configurar_2fa", "desafio": nuevo_desafio(u["id"], "alta", sec),
+                                   "secreto": sec, "uri": uri_totp(u["usuario"], sec), "usuario": u["usuario"]})
+            return self._abrir_sesion(con, u)
 
     def api_post_logout(self, p, q):
         cookie = self.headers.get("Cookie") or ""
@@ -757,7 +946,9 @@ class Manejador(BaseHTTPRequestHandler):
     def api_get_usuarios(self, p, q):
         self._usuario(rol="dm")
         with db() as con:
-            rows = con.execute("SELECT id,usuario,nombre,rol,activo,creado FROM usuarios ORDER BY rol,nombre").fetchall()
+            rows = con.execute("""SELECT id,usuario,nombre,rol,activo,creado, totp IS NOT NULL AS doble_factor,
+                                  CASE WHEN bloqueado_hasta > ? THEN bloqueado_hasta END AS bloqueado_hasta
+                                  FROM usuarios ORDER BY rol,nombre""", (ahora(),)).fetchall()
         self._json([dict(r) for r in rows])
 
     def api_post_usuarios(self, p, q):
@@ -794,6 +985,12 @@ class Manejador(BaseHTTPRequestHandler):
                 con.execute("UPDATE usuarios SET hash=? WHERE id=?", (hash_pw(b["clave"]), uid))
             if b.get("rol") in ("dm", "intro") and uid != yo["id"]:
                 con.execute("UPDATE usuarios SET rol=? WHERE id=?", (b["rol"], uid))
+            if b.get("reiniciar_2fa"):
+                # Móvil perdido o cambiado: la próxima vez que entre volverá a configurar el doble factor
+                con.execute("UPDATE usuarios SET totp=NULL, totp_ultimo=NULL, recuperacion=NULL WHERE id=?", (uid,))
+                con.execute("DELETE FROM sesiones WHERE usuario_id=?", (uid,))
+            if b.get("desbloquear"):
+                con.execute("UPDATE usuarios SET fallos=0, bloqueado_hasta=NULL WHERE id=?", (uid,))
         self._json({"ok": True})
 
     # ---- casos -------------------------------------------------------------
@@ -970,6 +1167,9 @@ class Manejador(BaseHTTPRequestHandler):
 
     # ---- libro llave -------------------------------------------------------
     def api_get_llave(self, p, q):
+        if CFG["nas"]:
+            self._usuario(rol="dm")
+            return self._json({"disponible": False, "nas": True, "filas": []})
         self._usuario(rol="dm")
         con = llave_db()
         if con is None:
@@ -1041,9 +1241,19 @@ def main():
     ap.add_argument("--datos", default=os.path.join(BASE, "datos"), help="Carpeta de la base de datos")
     ap.add_argument("--llave", default=os.path.join(BASE, "llave", "llave.sqlite"), help="Ruta del libro llave (offline)")
     ap.add_argument("--no-navegador", action="store_true")
+    ap.add_argument("--nas", action="store_true",
+                    help="Servidor central en el NAS: sin libro llave, doble factor obligatorio, solo tras HTTPS")
+    ap.add_argument("--doble-factor", action="store_true", help="Exigir doble factor (código del móvil) también fuera del NAS")
+    ap.add_argument("--certificado", help="Servir por HTTPS con este certificado (PEM)")
+    ap.add_argument("--clave-certificado", help="Clave privada del certificado (PEM)")
     a = ap.parse_args()
 
     CFG["demo"] = a.demo
+    CFG["nas"] = a.nas
+    CFG["2fa"] = a.nas or a.doble_factor
+    CFG["https"] = bool(a.certificado)
+    if a.nas:
+        a.red = True  # dentro del contenedor; desde fuera solo se llega por el proxy HTTPS del NAS
     CFG["db"] = os.path.join(a.datos, "demo.sqlite" if a.demo else "registro.sqlite")
     CFG["llave"] = os.path.join(a.datos, "llave_demo", "llave.sqlite") if a.demo else os.path.abspath(a.llave)
     CFG["red_fs"] = es_ruta_de_red(a.datos)
@@ -1054,24 +1264,36 @@ def main():
         demo.poblar(CFG["db"], CFG["llave"], hash_pw, diagnosticos)
     diccionario()
 
+    if a.nas and not a.demo:
+        # Copia diaria en <datos>/copias (las copias de seguridad del NAS deben incluir esa carpeta)
+        threading.Thread(target=copias_diarias, args=(os.path.join(a.datos, "copias"),), daemon=True).start()
     host = "0.0.0.0" if a.red else "127.0.0.1"
     srv = ThreadingHTTPServer((host, a.puerto), Manejador)
-    url = f"http://127.0.0.1:{a.puerto}"
+    if a.certificado:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(a.certificado, a.clave_certificado)
+        srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+    url = f"{'https' if a.certificado else 'http'}://127.0.0.1:{a.puerto}"
     print("\n  ╔══════════════════════════════════════════════════════╗")
     print("  ║   Registro WILLEM · H.C.U. Virgen de la Arrixaca      ║")
     print("  ╚══════════════════════════════════════════════════════╝")
     print(f"  Abierto en: {url}" + ("   (MODO DEMOSTRACIÓN)" if a.demo else ""))
-    if a.red:
+    if a.nas:
+        print("  Acceso: a través del proxy inverso HTTPS del NAS (este puerto no debe publicarse fuera del NAS)")
+    elif a.red:
         import socket
         try:
             ip = socket.gethostbyname(socket.gethostname())
-            print(f"  Desde otros PCs de la red: http://{ip}:{a.puerto}")
+            print(f"  Desde otros PCs de la red: {'https' if a.certificado else 'http'}://{ip}:{a.puerto}")
         except OSError:
             pass
     print(f"  Base de datos: {CFG['db']}" + ("   (carpeta de red)" if CFG["red_fs"] else ""))
     if CFG["red_fs"]:
         print("  AVISO: con la base en una carpeta de red, abra el servidor en UN SOLO ordenador a la vez.")
-    print(f"  Libro llave:   {CFG['llave']}")
+    print(f"  Libro llave:   {'(no hay: en el NAS solo se guardan casos con número)' if CFG['nas'] else CFG['llave']}")
+    if CFG["2fa"]:
+        print("  Doble factor:  obligatorio (código de 6 cifras del móvil)")
     print("  Para cerrar: Ctrl+C o cierre esta ventana.\n")
     if not a.no_navegador:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()

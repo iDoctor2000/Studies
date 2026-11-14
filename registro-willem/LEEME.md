@@ -196,3 +196,18 @@ numerados a mano, empiece después del último).
 Seguridad: solo escucha en este Mac (127.0.0.1). Cada apertura tiene una clave aleatoria que se
 exige en cada petición, y se comprueba la cabecera Host. Deje abierta la ventana del Terminal
 mientras trabaja; al cerrarla, la estación se apaga.
+
+## Registro central en el NAS (fase 3)
+
+Guía completa, paso a paso, en **[docs/NAS.md](docs/NAS.md)**. Resumen:
+
+- El servidor va en un contenedor (`Dockerfile`, `nas/docker-compose.yml`) en Container Manager,
+  con `servidor.py --nas`: sin libro llave, **doble factor obligatorio** (código de 6 cifras con QR
+  y códigos de recuperación), bloqueo tras intentos fallidos, cookies solo por HTTPS y una copia
+  diaria de la base de datos en `datos/copias`.
+- Se entra solo por la red privada (Tailscale) y por HTTPS (proxy inverso de DSM). No se abre
+  ningún puerto en el router.
+- La Estación del Mac confía únicamente en el certificado del NAS que usted confirme (huella
+  SHA-256) y pide el código del móvil al pasar las propuestas.
+- Fuera del NAS también se puede exigir el doble factor (`--doble-factor`) y servir por HTTPS
+  directamente (`--certificado cert.pem --clave-certificado clave.pem`).

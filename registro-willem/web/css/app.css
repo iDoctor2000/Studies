@@ -669,3 +669,19 @@ textarea.inp { width: 100%; height: auto; min-height: 76px; padding: 10px 12px; 
 .informe-txt mark.cita { background: #fde047; color: #111; border-radius: 3px; padding: 1px 2px; box-shadow: 0 0 0 2px #fde047; }
 .informe-txt .marca-anon { color: var(--ia); font-weight: 700; }
 .lista-res { padding-left: 18px; line-height: 1.8; }
+
+/* ===== Doble factor ===== */
+.login .caja.ancha { width: min(520px, 100%); }
+.ic-2fa { width: 56px; height: 56px; border-radius: 18px; display: grid; place-items: center; color: #fff; background: linear-gradient(135deg, var(--brand), var(--brand-2)); box-shadow: 0 12px 28px -12px var(--brand-2); }
+.ic-2fa svg { width: 30px; height: 30px; }
+.codigo-2fa { font: 600 26px/1.2 var(--mono); letter-spacing: .3em; text-align: center; padding: 12px; }
+.pasos-2fa { padding-left: 20px; margin: 0; display: grid; gap: 14px; color: var(--ink-2); font-size: 14.5px; }
+.pasos-2fa li::marker { font-weight: 700; color: var(--brand); }
+.qr-2fa { margin: 10px 0 6px; display: block; width: max-content; padding: 10px; background: #fff; border-radius: 14px; border: 1px solid var(--line); }
+.qr-2fa svg, .qr-2fa img { display: block; width: 184px; height: 184px; }
+.clave-2fa { font-size: 13px; color: var(--ink-3); }
+.clave-2fa code { font-family: var(--mono); color: var(--ink); background: var(--surface-2); padding: 2px 6px; border-radius: 6px; word-break: break-all; }
+.ayuda-2fa { font-size: 13.5px; color: var(--ink-2); }
+.ayuda-2fa summary { cursor: pointer; color: var(--brand); font-weight: 600; margin-bottom: 6px; }
+.codigos-rec { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 14px 0; }
+.codigos-rec code { font: 600 16px/1 var(--mono); text-align: center; padding: 10px; border-radius: 10px; background: var(--surface-2); border: 1px dashed var(--line-2); letter-spacing: .06em; }

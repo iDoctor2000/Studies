@@ -27,7 +27,7 @@ async function api(metodo, url, cuerpo, opts = {}) {
     body: cuerpo ? JSON.stringify(cuerpo) : undefined,
   });
   const datos = await r.json().catch(() => ({}));
-  if (r.status === 401 && url !== "login") { S.yo = null; pintarLogin(); throw new Error(datos.error || "Sesión caducada"); }
+  if (r.status === 401 && !url.startsWith("login")) { S.yo = null; pintarLogin(); throw new Error(datos.error || "Sesión caducada"); }
   if (!r.ok) throw new Error(datos.error || `Error ${r.status}`);
   return datos;
 }
@@ -148,12 +148,12 @@ async function enrutar() {
     else if (pag === "casos") await pCasos(qs);
     else if (pag === "nuevo") await pNuevo(qs);
     else if (pag === "caso") await pCaso(+a, b);
-    else if (pag === "llave" && esDM()) await pLlave();
+    else if (pag === "llave" && esDM() && !S.info?.nas) await pLlave();
     else if (pag === "exportar" && esDM()) await pExportar();
     else if (pag === "usuarios" && esDM()) await pUsuarios();
     else if (pag === "diccionario") await pDiccionario();
     else if (pag === "dudas") await pDudas();
-    else if (pag === "envio" && esDM()) await pEnvio();
+    else if (pag === "envio" && esDM() && !S.info?.nas) await pEnvio();
     else if (pag === "ia" && esDM()) await pIA();
     else if (pag === "carpeta" && navegador()) await pCarpeta();
     else if (pag === "unir" && navegador() && esDM()) await pUnir();
@@ -275,13 +275,94 @@ function pintarLogin() {
     ev.preventDefault();
     const f = new FormData(ev.target);
     try {
-      await api("POST", "login", { usuario: f.get("usuario"), clave: f.get("clave") });
-      S.info = await api("GET", "estado");
-      S.yo = S.info.usuario;
-      if (!location.hash) location.hash = "#/panel";
-      await entrar();
+      await continuarLogin(await api("POST", "login", { usuario: f.get("usuario"), clave: f.get("clave") }));
     } catch (e) { $("#errLogin").textContent = e.message; }
   };
+}
+
+// ---------------------------------------------------------------------------
+//  Doble factor (código de 6 cifras de una aplicación del móvil)
+// ---------------------------------------------------------------------------
+async function continuarLogin(r) {
+  if (r?.paso === "codigo") return pedirCodigo(r.desafio);
+  if (r?.paso === "configurar_2fa") return configurarDobleFactor(r);
+  S.info = await api("GET", "estado");
+  S.yo = S.info.usuario;
+  if (r?.recuperacion) await mostrarRecuperacion(r.recuperacion);
+  if (!location.hash || location.hash === "#/") location.hash = "#/panel";
+  await entrar();
+}
+
+const cajaLogin = (html) => { $("#raiz").innerHTML = `<div class="login">${heroe()}<div class="lado">${html}</div></div>`; };
+const inputCodigo = `<input class="inp codigo-2fa" name="codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="9" placeholder="000 000" required autofocus>`;
+
+function pedirCodigo(desafio) {
+  cajaLogin(`<form class="caja form" id="fCod">
+    <div class="ic-2fa">${icono("escudo")}</div>
+    <div><h2>Verificación en dos pasos</h2><div class="sub">Abra la aplicación de códigos de su móvil y escriba el código de 6 cifras de <b>WILLEM Arrixaca</b>.</div></div>
+    <label>Código${inputCodigo}</label>
+    <div class="error" id="errCod"></div>
+    <button class="btn primario grande" style="justify-content:center">Verificar ${icono("flechaD")}</button>
+    <details class="ayuda-2fa"><summary>¿Ha perdido o cambiado el móvil?</summary>
+      Escriba en la casilla uno de sus <b>códigos de recuperación</b> (del tipo <code>abcd-1234</code>); cada uno sirve una sola vez.
+      Si no los tiene, pida a un data manager que le <b>reinicie el doble factor</b>.</details>
+    <a href="#" id="volverLogin" class="sub">${icono("flechaI")} Volver</a>
+  </form>`);
+  $("#volverLogin").onclick = (ev) => { ev.preventDefault(); pintarLogin(); };
+  $("#fCod").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const codigo = new FormData(ev.target).get("codigo").replace(/\s/g, "");
+    try { await continuarLogin(await api("POST", "login/codigo", { desafio, codigo })); }
+    catch (e) { $("#errCod").textContent = e.message; if (/caducado/.test(e.message)) setTimeout(pintarLogin, 2200); }
+  };
+}
+
+const cargarScript = (src) => new Promise((ok, mal) => {
+  if (document.querySelector(`script[src="${src}"]`)) return ok();
+  const sc = document.createElement("script"); sc.src = src; sc.onload = ok; sc.onerror = () => mal(new Error("No se pudo cargar " + src));
+  document.head.append(sc);
+});
+
+async function configurarDobleFactor(r) {
+  let qr = "";
+  try {
+    await cargarScript("vendor/qrcode.js");
+    const q = window.qrcode(0, "M"); q.addData(r.uri); q.make();
+    qr = q.createSvgTag(4, 2);
+  } catch { qr = ""; }
+  const clave = r.secreto.replace(/(.{4})/g, "$1 ").trim();
+  cajaLogin(`<form class="caja form ancha" id="fAlta">
+    <div class="ic-2fa">${icono("escudo")}</div>
+    <div><h2>Active la verificación en dos pasos</h2><div class="sub">Por seguridad, el registro pide además un código que cambia cada 30 segundos en su móvil. Solo hay que configurarlo una vez.</div></div>
+    <ol class="pasos-2fa">
+      <li><b>Instale una aplicación de códigos</b> en el móvil: Google Authenticator, Microsoft Authenticator o, en el iPhone, la app <i>Contraseñas</i>.</li>
+      <li><b>Escanee este código</b> con la aplicación («Añadir cuenta» → «Escanear código QR»):
+        <div class="qr-2fa">${qr || "<span class='sub'>(no se ha podido dibujar el QR: use la clave de abajo)</span>"}</div>
+        <div class="clave-2fa">¿No puede escanear? Elija «Introducir clave» y escriba: <code>${esc(clave)}</code> (cuenta: <b>${esc(r.usuario)}</b>)</div></li>
+      <li><b>Escriba el código de 6 cifras</b> que le muestra ahora la aplicación:${inputCodigo}</li>
+    </ol>
+    <div class="error" id="errAlta"></div>
+    <button class="btn primario grande" style="justify-content:center">${icono("check")} Activar y entrar</button>
+    <a href="#" id="volverLogin" class="sub">${icono("flechaI")} Volver</a>
+  </form>`);
+  $("#volverLogin").onclick = (ev) => { ev.preventDefault(); pintarLogin(); };
+  $("#fAlta").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const codigo = new FormData(ev.target).get("codigo").replace(/\s/g, "");
+    try { await continuarLogin(await api("POST", "login/activar", { desafio: r.desafio, codigo })); }
+    catch (e) { $("#errAlta").textContent = e.message; if (/caducado/.test(e.message)) setTimeout(pintarLogin, 2200); }
+  };
+}
+
+function mostrarRecuperacion(codigos) {
+  return modal({
+    titulo: "Guarde sus códigos de recuperación", cancelar: "", aceptar: "Ya los he guardado",
+    html: `<p>Sirven para entrar si pierde o cambia el móvil. <b>Cada uno se puede usar una sola vez</b> y no se volverán a mostrar.</p>
+      <div class="codigos-rec">${codigos.map((c) => `<code>${esc(c)}</code>`).join("")}</div>
+      <p class="sub">Guárdelos en un sitio seguro (por ejemplo, impresos o en el gestor de contraseñas), nunca junto al libro llave.</p>
+      <button class="btn pequeno" id="copRec">${icono("importar")} Copiar</button>`,
+    alAbrir: (m) => { $("#copRec", m).onclick = async () => { try { await navigator.clipboard.writeText(codigos.join("\n")); toast("Copiados"); } catch { toast("Selecciónelos y cópielos a mano", "info"); } }; },
+  });
 }
 
 function pintarConfiguracion() {
@@ -301,10 +382,8 @@ function pintarConfiguracion() {
     if (f.clave !== f.clave2) return ($("#errConf").textContent = "Las contraseñas no coinciden");
     try {
       await api("POST", "configurar", f);
-      await api("POST", "login", { usuario: f.usuario, clave: f.clave });
-      S.info = await api("GET", "estado"); S.yo = S.info.usuario;
       location.hash = "#/panel";
-      await entrar();
+      await continuarLogin(await api("POST", "login", { usuario: f.usuario, clave: f.clave }));
     } catch (e) { $("#errConf").textContent = e.message; }
   };
 }
@@ -325,10 +404,10 @@ function pintarEstructura() {
         <a href="#/dudas" data-pag="dudas">${icono("bandera")} Dudas <span class="contador aviso oculto" id="nDudas"></span></a>
         <a href="#/diccionario" data-pag="diccionario">${icono("libro")} Diccionario</a>
         ${dm ? `<div class="titulo">Data manager</div>
-        <a href="#/llave" data-pag="llave">${icono("llave")} Libro llave</a>
+        ${S.info?.nas ? "" : `<a href="#/llave" data-pag="llave">${icono("llave")} Libro llave</a>`}
         <a href="#/ia" data-pag="ia">${icono("chispa")} Importar de la IA</a>
         ${navegador() ? `<a href="#/unir" data-pag="unir">${icono("unir")} Unir casos</a>` : ""}
-        <a href="#/envio" data-pag="envio">${icono("enviar")} Envío al registro</a>
+        ${S.info?.nas ? "" : `<a href="#/envio" data-pag="envio">${icono("enviar")} Envío al registro</a>`}
         <a href="#/exportar" data-pag="exportar">${icono("exportar")} Exportar</a>
         ${navegador() ? "" : `<a href="#/usuarios" data-pag="usuarios">${icono("usuarios")} Usuarios</a>`}` : ""}
         ${navegador() ? `<div class="titulo">Guardado</div><a href="#/carpeta" data-pag="carpeta">${icono("nube")} Carpeta compartida</a>` : ""}
@@ -1353,12 +1432,16 @@ async function pExportar() {
 async function pUsuarios() {
   barra("Usuarios", "Data manager", `<button class="btn primario" id="bNU">${icono("mas")} Nuevo usuario</button>`);
   const us = await api("GET", "usuarios");
-  $("#contenido").innerHTML = `<div class="tarjeta"><table class="tabla"><thead><tr><th>Persona</th><th>Usuario</th><th>Rol</th><th>Estado</th><th>Alta</th><th></th></tr></thead><tbody>
+  $("#contenido").innerHTML = `<div class="tarjeta"><table class="tabla"><thead><tr><th>Persona</th><th>Usuario</th><th>Rol</th><th>Estado</th>${navegador() ? "" : "<th>Doble factor</th>"}<th>Alta</th><th></th></tr></thead><tbody>
     ${us.map((u) => `<tr style="cursor:default"><td><div style="display:flex;gap:10px;align-items:center"><span class="avatar" style="background:${colorDe(u.usuario)}">${esc(iniciales(u.nombre))}</span><b>${esc(u.nombre)}</b></div></td>
       <td class="codigo">${esc(u.usuario)}</td><td>${u.rol === "dm" ? `<span class="pill" style="--c:#7c3aed">Data manager</span>` : `<span class="pill" style="--c:#0f766e">Introducción de datos</span>`}</td>
-      <td>${u.activo ? `<span class="estado validado">Activo</span>` : `<span class="estado borrador">Desactivado</span>`}</td><td class="quien">${esc(fmtFecha(u.creado))}</td>
+      <td>${u.activo ? `<span class="estado validado">Activo</span>` : `<span class="estado borrador">Desactivado</span>`}${u.bloqueado_hasta ? ` <span class="pill sec" style="--c:#dc2626">${icono("candado")} Bloqueado</span>` : ""}</td>
+      ${navegador() ? "" : `<td>${u.doble_factor ? `<span class="pill sec" style="--c:#16a34a">${icono("escudo")} Activado</span>` : `<span class="sub">${S.info?.doble_factor ? "Se configurará al entrar" : "No"}</span>`}</td>`}
+      <td class="quien">${esc(fmtFecha(u.creado))}</td>
       <td style="text-align:right;white-space:nowrap">${u.id !== S.yo.id ? `<button class="btn pequeno" data-rol="${u.id}" data-r="${u.rol}">Cambiar rol</button> <button class="btn pequeno" data-act="${u.id}" data-a="${u.activo}">${u.activo ? "Desactivar" : "Activar"}</button>` : ""}
-        <button class="btn pequeno" data-pw="${u.id}">Contraseña</button></td></tr>`).join("")}</tbody></table></div>`;
+        <button class="btn pequeno" data-pw="${u.id}">Contraseña</button>
+        ${u.doble_factor ? `<button class="btn pequeno" data-2fa="${u.id}" data-n="${esc(u.nombre)}" title="Si ha perdido o cambiado el móvil">Reiniciar doble factor</button>` : ""}
+        ${u.bloqueado_hasta ? `<button class="btn pequeno" data-desb="${u.id}">Desbloquear</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
   const recargar = () => pUsuarios();
   $("#bNU").onclick = () => modal({
     titulo: "Nuevo usuario", aceptar: "Crear",
@@ -1369,6 +1452,12 @@ async function pUsuarios() {
   });
   $$("[data-act]").forEach((b) => (b.onclick = async () => { try { await api("PUT", "usuarios/" + b.dataset.act, { activo: b.dataset.a !== "1" }); recargar(); } catch (e) { toast(e.message, "mal"); } }));
   $$("[data-rol]").forEach((b) => (b.onclick = async () => { try { await api("PUT", "usuarios/" + b.dataset.rol, { rol: b.dataset.r === "dm" ? "intro" : "dm" }); recargar(); } catch (e) { toast(e.message, "mal"); } }));
+  $$("[data-2fa]").forEach((b) => (b.onclick = async () => {
+    if (!(await modal({ titulo: "Reiniciar el doble factor", aceptar: "Reiniciar", peligro: true,
+      html: `<p><b>${esc(b.dataset.n)}</b> tendrá que volver a configurar la aplicación de códigos la próxima vez que entre (por ejemplo, porque ha cambiado de móvil).</p><p class="sub">Se cerrarán sus sesiones abiertas.</p>` }))) return;
+    try { await api("PUT", "usuarios/" + b.dataset["2fa"], { reiniciar_2fa: true }); toast("Doble factor reiniciado"); recargar(); } catch (e) { toast(e.message, "mal"); }
+  }));
+  $$("[data-desb]").forEach((b) => (b.onclick = async () => { try { await api("PUT", "usuarios/" + b.dataset.desb, { desbloquear: true }); toast("Usuario desbloqueado"); recargar(); } catch (e) { toast(e.message, "mal"); } }));
   $$("[data-pw]").forEach((b) => (b.onclick = () => modal({
     titulo: "Cambiar contraseña", aceptar: "Guardar", html: `<form class="form" onsubmit="return false"><label>Nueva contraseña (mín. 8)<input class="inp" id="np" type="password"></label><div class="error"></div></form>`,
     alAceptar: async (m) => { await api("PUT", "usuarios/" + b.dataset.pw, { clave: $("#np", m).value }); toast("Contraseña cambiada"); },

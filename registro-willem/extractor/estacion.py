@@ -16,6 +16,8 @@ anonimizadas hacia el servidor del registro que usted indique.
 import argparse
 import datetime as dt
 import glob
+import hashlib
+import http.client
 import http.cookiejar
 import json
 import mimetypes
@@ -24,6 +26,7 @@ import platform
 import re
 import secrets
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -55,7 +58,77 @@ mimetypes.add_type("text/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
 
 AJUSTES_DEF = {"modelo": "qwen3:30b", "url_ia": "http://127.0.0.1:11434", "proveedor": "ollama",
-               "url_registro": "http://127.0.0.1:8765", "usuario_registro": "", "carpeta": ""}
+               "url_registro": "http://127.0.0.1:8765", "usuario_registro": "", "carpeta": "", "huella_registro": ""}
+
+
+# ---------------------------------------------------------------------------
+#  Conexión con el registro. Si el NAS usa un certificado propio (no de una autoridad
+#  conocida), se confía SOLO en ese certificado concreto: su huella SHA-256 se guarda la
+#  primera vez (tras confirmarlo) y cualquier cambio posterior bloquea el envío.
+# ---------------------------------------------------------------------------
+class CertificadoNoReconocido(Exception):
+    def __init__(self, huella, cambiado=False):
+        super().__init__("certificado")
+        self.huella, self.cambiado = huella, cambiado
+
+
+def huella_bonita(h):
+    return ":".join(h[i:i + 2] for i in range(0, len(h), 2)).upper()
+
+
+def huella_servidor(url):
+    p = urllib.parse.urlparse(url)
+    pem = ssl.get_server_certificate((p.hostname, p.port or 443), timeout=5)
+    return hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest()
+
+
+class _ConexionFijada(http.client.HTTPSConnection):
+    def __init__(self, *a, huella="", **k):
+        k.pop("check_hostname", None)
+        super().__init__(*a, **k)
+        self._huella = huella
+
+    def connect(self):
+        super().connect()
+        real = hashlib.sha256(self.sock.getpeercert(binary_form=True)).hexdigest()
+        if real != self._huella:
+            self.sock.close()
+            raise CertificadoNoReconocido(real, cambiado=True)
+
+
+class _ManejadorFijado(urllib.request.HTTPSHandler):
+    def __init__(self, huella):
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE  # la comprobación es la huella exacta, más estricta
+        super().__init__(context=ctx)
+        self._h = huella
+
+    def https_open(self, req):
+        return self.do_open(lambda host, **kw: _ConexionFijada(host, huella=self._h, **kw), req, context=self._context)
+
+
+def abridor(url, huella="", cookies=None):
+    manejadores = [urllib.request.HTTPCookieProcessor(cookies)] if cookies is not None else []
+    if url.startswith("https://") and huella:
+        manejadores.append(_ManejadorFijado(huella))
+    return urllib.request.build_opener(*manejadores)
+
+
+def abrir_url(url, huella="", data=None, cookies=None, timeout=10, metodo=None):
+    """Como urlopen, pero con la huella del certificado si la hay. Lanza CertificadoNoReconocido."""
+    req = urllib.request.Request(url, data=data, method=metodo, headers={"Content-Type": "application/json"} if data else {})
+    try:
+        return abridor(url, huella, cookies).open(req, timeout=timeout)
+    except CertificadoNoReconocido:
+        raise
+    except urllib.error.URLError as e:
+        r = getattr(e, "reason", None)
+        if isinstance(r, CertificadoNoReconocido):
+            raise r
+        if isinstance(r, ssl.SSLCertVerificationError) and url.startswith("https://") and not huella:
+            raise CertificadoNoReconocido(huella_servidor(url))
+        raise
 
 
 class Estacion:
@@ -89,12 +162,18 @@ class Estacion:
         for k in AJUSTES_DEF:
             if k in cambios and isinstance(cambios[k], str):
                 a[k] = cambios[k].strip()
+        if urllib.parse.urlparse(a["url_registro"]).hostname not in ("127.0.0.1", "localhost", "::1") and a["url_registro"].startswith("http://"):
+            raise ValueError("Fuera de este Mac, el registro solo se usa por https:// (conexión cifrada)")
         if urllib.parse.urlparse(a["url_ia"]).hostname not in ("127.0.0.1", "localhost", "::1"):
             raise ValueError("La IA tiene que estar en este Mac (127.0.0.1)")
         if "cloud" in a["modelo"].lower():
             raise ValueError("Use un modelo local (no «cloud»)")
         if not re.match(r"^https?://", a["url_registro"]):
             raise ValueError("La dirección del registro debe empezar por http:// o https://")
+        if "url_registro" in cambios and cambios["url_registro"].strip() != self.ajustes()["url_registro"]:
+            a["huella_registro"] = ""  # otro registro: hay que volver a confiar en su certificado
+        if "huella_registro" in cambios and not re.fullmatch(r"[0-9a-f]{64}|", cambios["huella_registro"]):
+            raise ValueError("Huella no válida")
         with open(self.ruta_ajustes, "w", encoding="utf-8") as f:
             json.dump(a, f, ensure_ascii=False, indent=1)
         self._cache.clear()
@@ -137,12 +216,16 @@ class Estacion:
         a = self.ajustes()
 
         def mirar():
+            base = {"url": a["url_registro"], "https": a["url_registro"].startswith("https://"), "fijado": bool(a.get("huella_registro"))}
             try:
-                with urllib.request.urlopen(a["url_registro"].rstrip("/") + "/api/estado", timeout=2) as r:
+                with abrir_url(a["url_registro"].rstrip("/") + "/api/estado", a.get("huella_registro"), timeout=3) as r:
                     d = json.loads(r.read())
-                return {"ok": True, "url": a["url_registro"], "configurar": d.get("necesita_configuracion"), "demo": d.get("demo")}
+                return {**base, "ok": True, "configurar": d.get("necesita_configuracion"), "demo": d.get("demo"),
+                        "doble_factor": d.get("doble_factor"), "nas": d.get("nas")}
+            except CertificadoNoReconocido as e:
+                return {**base, "ok": False, "certificado": huella_bonita(e.huella), "huella": e.huella, "cambiado": e.cambiado}
             except Exception:
-                return {"ok": False, "url": a["url_registro"]}
+                return {**base, "ok": False}
         return self._cacheado("registro", 4, mirar)
 
     def importadas(self):
@@ -295,7 +378,7 @@ class Estacion:
         self.lanzar("ia", "Rellenar con la IA", fn)
 
     # 3 · pasar al registro
-    def pasar_al_registro(self, usuario, clave):
+    def pasar_al_registro(self, usuario, clave, codigo=""):
         a = self.ajustes()
         url = a["url_registro"].rstrip("/")
         props = [p for p in self.propuestas() if not p[3]]
@@ -304,16 +387,19 @@ class Estacion:
         if not usuario or not clave:
             raise ValueError("Escriba su usuario y contraseña del registro")
 
+        huella = a.get("huella_registro", "")
+        galletas = http.cookiejar.CookieJar()
+
         def fn():
             self._avance(0, len(props), "Conectando con el registro…")
-            abridor = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
             def pedir(ruta, cuerpo):
-                req = urllib.request.Request(url + "/api/" + ruta, data=json.dumps(cuerpo).encode(), method="POST",
-                                             headers={"Content-Type": "application/json"})
                 try:
-                    with abridor.open(req, timeout=60) as r:
+                    with abrir_url(url + "/api/" + ruta, huella, json.dumps(cuerpo).encode(), galletas, timeout=60, metodo="POST") as r:
                         return json.loads(r.read())
+                except CertificadoNoReconocido as e:
+                    raise RuntimeError("El certificado del registro no es el esperado" + (" (ha cambiado)" if e.cambiado else "")
+                                       + ": no se ha enviado nada. Revíselo en el circuito antes de seguir.")
                 except urllib.error.HTTPError as e:
                     try:
                         msg = json.loads(e.read()).get("error")
@@ -322,7 +408,13 @@ class Estacion:
                     raise RuntimeError(msg or f"El registro respondió con error {e.code}")
                 except urllib.error.URLError:
                     raise RuntimeError(f"No se puede conectar con el registro en {url}. ¿Está abierto?")
-            pedir("login", {"usuario": usuario, "clave": clave})
+            r = pedir("login", {"usuario": usuario, "clave": clave})
+            if r.get("paso") == "configurar_2fa":
+                raise RuntimeError("Antes de usar la estación, entre una vez en el registro desde el navegador para activar el doble factor")
+            if r.get("paso") == "codigo":
+                if not codigo:
+                    raise RuntimeError("El registro pide el código de 6 cifras de su móvil: vuelva a intentarlo escribiéndolo")
+                pedir("login/codigo", {"desafio": r["desafio"], "codigo": codigo})
             imp = self.importadas()
             resultados = []
             for i in range(0, len(props), 10):
@@ -468,8 +560,15 @@ class Manejador(BaseHTTPRequestHandler):
                 E.rellenar_ia(bool(b.get("rehacer")))
                 return self._json({"ok": True})
             if metodo == "POST" and ruta == "registro":
-                E.pasar_al_registro((b.get("usuario") or "").strip(), b.get("clave") or "")
+                E.pasar_al_registro((b.get("usuario") or "").strip(), b.get("clave") or "", (b.get("codigo") or "").strip())
                 E.guardar_ajustes({"usuario_registro": (b.get("usuario") or "").strip()})
+                return self._json({"ok": True})
+            if metodo == "POST" and ruta == "confiar":
+                url = E.ajustes()["url_registro"]
+                real = huella_servidor(url)
+                if real != (b.get("huella") or ""):
+                    raise ValueError("El certificado ha cambiado mientras lo revisaba: vuelva a intentarlo")
+                E.guardar_ajustes({"huella_registro": real})
                 return self._json({"ok": True})
             if metodo == "POST" and ruta == "avisos":
                 return self._json(revision.resolver(E.privado, E.salida, b.get("base"), b.get("id"), b.get("decision", "visto"), b.get("texto", "")))

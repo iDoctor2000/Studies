@@ -313,3 +313,8 @@ main { max-width: 1380px; margin: 0 auto; padding: 28px 32px 30px; }
   .estados { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* Certificado del NAS y doble factor */
+code.huella { display: block; padding: 10px 12px; font-size: 12px; line-height: 1.6; word-break: break-all; }
+.aviso-rojo { display: flex; gap: 8px; color: var(--bad); background: var(--bad-soft); padding: 10px 12px; border-radius: 12px; }
+.campo input.cod { font: 600 22px var(--mono); letter-spacing: .25em; text-align: center; }

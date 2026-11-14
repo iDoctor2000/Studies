@@ -1,0 +1,28 @@
+# Registro WILLEM en el NAS (Synology · Container Manager → Proyecto)
+#
+# Estructura en el NAS (carpeta compartida "docker"):
+#   docker/willem/docker-compose.yml   ← este archivo
+#   docker/willem/registro-willem/     ← la carpeta del proyecto, copiada desde el Mac
+#   docker/willem/datos/               ← la base de datos (se crea sola; INCLUIRLA en las copias de seguridad)
+#
+# Para actualizar la aplicación basta con sustituir la carpeta registro-willem y volver a
+# construir el proyecto: los datos están aparte y no se tocan.
+services:
+  willem:
+    build: ./registro-willem
+    image: willem-registro:local
+    container_name: willem-registro
+    restart: unless-stopped
+    ports:
+      # Solo accesible desde el propio NAS: se entra a través del proxy inverso HTTPS de DSM
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - ./datos:/datos
+      - /etc/localtime:/etc/localtime:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - TZ=Europe/Madrid
