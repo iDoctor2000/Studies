@@ -142,6 +142,7 @@ async function enrutar() {
   $$(".nav a").forEach((x) => x.classList.toggle("activo", x.dataset.pag === pag || (pag === "caso" && x.dataset.pag === "casos")));
   window.scrollTo(0, 0);
   const c = $("#contenido");
+  c.classList.remove("vintage");
   c.innerHTML = `<div class="cargando">${icono("logo", "latido-logo")}</div>`;
   try {
     if (pag === "panel") await pPanel();
@@ -652,8 +653,9 @@ async function pCaso(num, tabId) {
   const tabs = pestanasDelCaso(S.modelo, E.caso);
   E.tab = tabs.find((t) => t.id === tabId) ? tabId : tabs[0].id; // siempre empieza por la primera pestaña ("Diagnósticos")
   barra(`Caso #${pad(num)}`, `<a href="#/casos">Casos</a> › ${esc(diagnosticosDe(E.caso).map((g) => ENFERMEDADES[g]?.corto || g).join(" · "))}`,
-    `${E.caso.informes?.length ? `<button class="btn" id="bInforme">${icono("libro")} Informe${E.caso.informes.length > 1 ? `s (${E.caso.informes.length})` : ""}</button>` : ""}<button class="btn" id="bImp">${icono("importar")} Importar informe</button><button class="btn fantasma" id="bHist">${icono("historial")} Historial</button>`);
+    `<button class="btn ${vintageActivo() ? "on-vintage" : ""}" id="bVista" title="Vista compacta de escritorio: más variables por pantalla y manejo con teclado">${icono("vintage")} ${vintageActivo() ? "Modo normal" : "Modo Vintage"}</button>${E.caso.informes?.length ? `<button class="btn" id="bInforme">${icono("libro")} Informe${E.caso.informes.length > 1 ? `s (${E.caso.informes.length})` : ""}</button>` : ""}<button class="btn" id="bImp">${icono("importar")} Importar informe</button><button class="btn fantasma" id="bHist">${icono("historial")} Historial</button>`);
   $("#bInforme")?.addEventListener("click", () => abrirInforme());
+  $("#bVista").onclick = () => alternarVintage(num);
   $("#bImp").onclick = abrirImportador;
   $("#bHist").onclick = abrirHistorial;
   pintarCaso(true);
@@ -673,6 +675,9 @@ function pintarCaso(animar = false) {
   const cont = $("#contenido");
   const scroll = scrollY;
   const foco = document.activeElement?.dataset?.foco;
+  const V = vintageActivo();
+  E.vintage = V;
+  cont.classList.toggle("vintage", V);
 
   cont.style.setProperty("--c", e.color);
   cont.innerHTML = `
@@ -722,7 +727,8 @@ function pintarCaso(animar = false) {
           <div class="der">${!soloLectura() && iaDePestana(tab, c).length ? `<button class="btn ia" id="bConfIA" title="Da por revisados los datos propuestos por la IA que se ven en esta pestaña">${icono("chispa")} Confirmar lo de la IA (${iaDePestana(tab, c).length})</button>` : ""}${soloLectura() ? "" : `<button class="btn fantasma" id="bRellenarNC" title="Pone Desconocido en todas las preguntas Sí/No y listas sin contestar de esta pestaña">${icono("interrogacion")} Resto: Desconocido</button>
             <button class="btn" id="bRellenar" title="Pone No en todas las preguntas Sí/No y listas con opción «No» o «Ninguno» que estén sin contestar en esta pestaña">${icono("varita")} Marcar el resto como No</button>`}</div>
         </div>
-        <div id="seccion">${tab.bloques.filter((b) => b.items.some((it) => visible(it, c.valores))).map((b) => `${b.grupo ? `<div class="bloque-tit bloque-enf" style="--c:${ENFERMEDADES[b.grupo].color}">${icono(b.grupo)} ${esc(b.subtitulo)}</div>`
+        ${V ? `<div class="v-teclas" title="Con el foco en una pregunta">${icono("vintage")} <b>Teclado:</b> <kbd>S</kbd> Sí · <kbd>N</kbd> No · <kbd>?</kbd> Desconocido · <kbd>D</kbd> Duda · <kbd>Tab</kbd> o <kbd>↓</kbd> siguiente · <kbd>↑</kbd> anterior</div>` : ""}
+        <div id="seccion" class="${V ? "v-paneles" : ""}">${V ? seccionVintage(tab, c) : tab.bloques.filter((b) => b.items.some((it) => visible(it, c.valores))).map((b) => `${b.grupo ? `<div class="bloque-tit bloque-enf" style="--c:${ENFERMEDADES[b.grupo].color}">${icono(b.grupo)} ${esc(b.subtitulo)}</div>`
           : b.subtitulo ? `<div class="bloque-tit">${esc(b.subtitulo)}</div>` : ""}
           <div class="campos">${b.items.filter((it) => visible(it, c.valores)).map((it) => campoHTML(it, c.valores, animar)).join("")}</div>`).join("")}</div>
         ${soloLectura() ? "" : `<div class="rellenar-abajo"><button class="btn grande" id="bRellenar2" title="Pone No en todas las preguntas Sí/No (y desplegables con opción No) que no haya contestado en esta pestaña">${icono("varita")} Todo lo que no he marcado, a «No»</button></div>`}
@@ -745,6 +751,14 @@ function pintarCaso(animar = false) {
   }));
   if (!animar) window.scrollTo(0, scroll);
   if (foco) $(`[data-foco="${CSS.escape(foco)}"]`)?.focus();
+  if (V && E.avanzar) {  // tras contestar con el teclado: a la fecha pendiente de esa pregunta o a la pregunta siguiente
+    const filas = $$("#seccion .vf");
+    const i = filas.findIndex((f) => f.dataset.k === E.avanzar.k);
+    const fechaVacia = i >= 0 && [...filas[i].querySelectorAll("input.fecha")].find((x) => !x.value);
+    const destino = fechaVacia || enfocable(filas[i + E.avanzar.paso] || filas[i]);
+    destino?.focus();
+    E.avanzar = null;
+  }
 
   $("#bDiag")?.addEventListener("click", editarDiagnosticos);
   $("#bDiag2")?.addEventListener("click", editarDiagnosticos);
@@ -804,8 +818,158 @@ function pintarCaso(animar = false) {
   const sec = $("#seccion");
   sec.addEventListener("click", alClicar);
   sec.addEventListener("change", alCambiar);
+  if (V) sec.addEventListener("keydown", teclaVintage);
   sec.addEventListener("input", (ev) => { if (ev.target.classList?.contains("fecha")) mascaraFecha(ev.target, ev); });
   actualizarGuardado();
+}
+
+// ---------------------------------------------------------------------------
+//  MODO VINTAGE: vista compacta de escritorio (como las bases de datos clásicas)
+//  Mismos datos, mismas reglas y mismo guardado; solo cambia cómo se pinta.
+// ---------------------------------------------------------------------------
+const VINTAGE_ANCHO_MIN = 1200;
+const vintageActivo = () => localStorage.getItem("willem_vista") === "vintage" && innerWidth >= VINTAGE_ANCHO_MIN;
+
+async function alternarVintage(num) {
+  await vaciarPendientes();
+  if (localStorage.getItem("willem_vista") === "vintage") localStorage.setItem("willem_vista", "normal");
+  else {
+    if (innerWidth < VINTAGE_ANCHO_MIN) {
+      return modal({ titulo: "El Modo Vintage necesita una pantalla de escritorio", cancelar: "", aceptar: "Entendido",
+        html: `<p>Muestra muchas variables a la vez, en letra pequeña y varias columnas, así que solo funciona en pantallas de al menos <b>${VINTAGE_ANCHO_MIN} píxeles de ancho</b> (un portátil o un monitor).</p>
+          <p class="sub">En el móvil, en una tableta o con la ventana estrecha se usa el modo normal. Si está en un ordenador, agrande la ventana y vuelva a intentarlo.</p>` });
+    }
+    localStorage.setItem("willem_vista", "vintage");
+    if (!localStorage.getItem("willem_vintage_visto")) {
+      localStorage.setItem("willem_vintage_visto", "1");
+      await modal({ titulo: "Modo Vintage", cancelar: "", aceptar: "Empezar",
+        html: `<p>Vista compacta, al estilo de las bases de datos de siempre: <b>muchas más variables por pantalla</b>, sin apenas desplazarse.</p>
+          <ul class="lista-vintage">
+            <li>Cada bloque es un panel; las pestañas van arriba.</li>
+            <li>Botones pequeños <b>NO · SÍ · ¿? · ${icono("bandera")}</b> (¿? = Desconocido, bandera = Duda). Pulsar otra vez el botón marcado lo deja sin contestar.</li>
+            <li><b>Con el teclado:</b> <kbd>S</kbd> Sí, <kbd>N</kbd> No, <kbd>?</kbd> Desconocido, <kbd>D</kbd> Duda; pasa sola a la siguiente pregunta. <kbd>Tab</kbd>, <kbd>↓</kbd> y <kbd>↑</kbd> para moverse.</li>
+            <li>Un punto ámbar marca lo que falta por contestar. Deje el ratón sobre una pregunta para ver su ayuda y su código.</li>
+          </ul>
+          <p class="sub">Los datos, el guardado automático y el Excel final son exactamente los mismos. Solo para pantalla de escritorio; puede volver al modo normal con el mismo botón.</p>` });
+    }
+  }
+  pCaso(num, E.tab);
+}
+addEventListener("resize", () => { if (E.caso && $("#seccion") && E.vintage !== vintageActivo()) pintarCaso(); });
+
+const enfocable = (fila) => fila && (fila.querySelector('[data-foco][tabindex="0"]') || fila.querySelector("input[data-foco], select[data-foco]") || fila.querySelector("[data-foco]"));
+
+function seccionVintage(tab, c) {
+  const v = c.valores;
+  return tab.bloques.filter((b) => b.items.some((it) => visible(it, v))).map((b) => {
+    const p = progresoItems(b.items, v);
+    return `<section class="v-panel ${p.pct === 100 ? "completo" : ""}" style="--c:${b.grupo ? ENFERMEDADES[b.grupo].color : "var(--brand)"}">
+      <h4>${b.grupo ? icono(b.grupo) : ""}<span>${esc(b.subtitulo || tab.titulo)}</span><i>${p.tot ? `${p.ok}/${p.tot}` : ""}</i></h4>
+      ${b.items.filter((it) => visible(it, v)).map((it) => campoVintage(it, v)).join("")}</section>`;
+  }).join("");
+}
+
+function campoVintage(it, v) {
+  const k = esc(it.codigo);
+  const mk = admiteMarcas(it) ? marcaDe(it, v) : null;
+  const resp = (() => {
+    if (mk) return mk === NC;
+    switch (it.tipoCampo) {
+      case "single": return it.opciones.some((o) => v[o.codigo] === 1);
+      case "multi": return it.opciones.some((o) => v[o.codigo] != null);
+      case "sinofecha": return v[it.codigo] === 0 || (v[it.codigo] === 1 && !!v[it.codigo + "_date"]);
+      default: return v[it.codigo] != null && v[it.codigo] !== "";
+    }
+  })();
+  const cuenta = !["fijo", "caso", "auto", "texto"].includes(it.tipoCampo);
+  const mIA = E.caso?.ia?.[it.codigo];
+  const conValor = mIA && (mIA.codigos || []).some((x) => v[x] != null && v[x] !== "");
+  const pendIA = conValor && !mIA.revisado;
+  const chipIA = conValor ? `<button class="ia-chip ${pendIA ? "pend" : ""} ${pendIA && mIA.aviso ? "aviso" : ""}" data-ia="${k}" tabindex="-1" title="${pendIA ? "Propuesto por la IA: pulse para ver de dónde lo saca" : "Dato de la IA ya revisado"}">IA${pendIA ? "" : " ✓"}</button>` : "";
+  const ayuda = it.ayuda && !/^DUPLICADO|Solapa/.test(it.ayuda) ? it.ayuda : "";
+  const tip = esc([it.etiqueta, ayuda, it.min != null && it.max != null ? `Rango esperado: ${it.min}–${it.max}${it.unidad ? " " + it.unidad : ""}` : "", "Código: " + it.codigo].filter(Boolean).join("\n"));
+  const fechaInp = (kk, val, tit = "") => `<input type="text" class="inp fecha" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="dd/mm/aaaa" title="${esc(tit)}"
+      data-in="${esc(kk)}" data-t="fecha" data-foco="${esc(kk)}" value="${esc(isoAFecha(val))}">`;
+  const marcas = () => `<button class="vm nc ${mk === NC ? "on" : ""}" data-marca="${NC}" data-mk="${k}" tabindex="-1" title="Desconocido: lo he buscado y no consta (tecla ?)">¿?</button><button class="vm duda ${mk === DUDA ? "on" : ""}" data-marca="${DUDA}" data-mk="${k}" tabindex="-1" title="Duda: que lo revise un data manager (tecla D)">${icono("bandera")}</button>`;
+  let ctrl = "", extra = "", ancho = false;
+  switch (it.tipoCampo) {
+    case "fijo": ctrl = `<span class="v-fijo">${esc(it.fijo || v[it.codigo] || "")}</span>`; break;
+    case "caso": ctrl = `<span class="v-fijo">#${pad(E.caso.numero)}</span>`; break;
+    case "sino":
+    case "sinofecha": {
+      const x = v[it.codigo];
+      ctrl = `<div class="vseg"><button class="no ${x === 0 ? "on" : ""}" data-sino="${k}" data-val="0" data-foco="${k}:0" tabindex="${x === 1 ? -1 : 0}">NO</button><button class="si ${x === 1 ? "on" : ""}" data-sino="${k}" data-val="1" data-foco="${k}:1" tabindex="${x === 1 ? 0 : -1}">SÍ</button>${marcas()}</div>`;
+      if (it.tipoCampo === "sinofecha" && x === 1) ctrl += fechaInp(it.codigo + "_date", v[it.codigo + "_date"], "Fecha");
+      break;
+    }
+    case "single": {
+      const sel = it.opciones.find((o) => v[o.codigo] === 1);
+      const corta = it.opciones.length <= 3 && it.opciones.reduce((n, o) => n + o.etiqueta.length, 0) <= 26;
+      if (corta) ctrl = `<div class="vseg">${it.opciones.map((o, i) => `<button class="si ${v[o.codigo] === 1 ? "on" : ""}" data-g="${k}" data-o="${esc(o.codigo)}" data-foco="${esc(o.codigo)}" tabindex="${(sel ? sel === o : i === 0) ? 0 : -1}" title="${esc(o.codigo)}">${esc(o.etiqueta)}</button>`).join("")}${marcas()}</div>`;
+      else ctrl = `<select class="vsel ${sel ? "on" : ""}" data-sel="${k}" data-foco="${k}:sel"><option value="">—</option>${it.opciones.map((o) => `<option value="${esc(o.codigo)}" ${sel === o ? "selected" : ""}>${esc(o.etiqueta)}</option>`).join("")}</select><div class="vseg">${marcas()}</div>`;
+      if (it.conFecha && !mk) extra += `<div class="vx"><span>Fecha</span>${fechaInp(it.codigo, v[it.codigo])}</div>`;
+      for (const o of it.opciones) if (o.conFecha && v[o.codigo] === 1) extra += `<div class="vx"><span>Fecha · ${esc(o.etiqueta)}</span>${fechaInp(o.codigo + "_date", v[o.codigo + "_date"])}</div>`;
+      break;
+    }
+    case "multi": {
+      ancho = it.opciones.length > 2 || it.opciones.reduce((n, o) => n + o.etiqueta.length, 0) > 22;
+      ctrl = `<div class="vops">${it.opciones.map((o, i) => { const x = v[o.codigo]; return `<button class="vop ${x === 1 ? "on" : ""} ${x === 0 ? "cero" : ""}" data-g="${k}" data-o="${esc(o.codigo)}" data-foco="${esc(o.codigo)}" tabindex="${i === 0 ? 0 : -1}" title="${esc(o.codigo)}">${esc(o.etiqueta)}</button>`; }).join("")}<div class="vseg">${marcas()}</div></div>`;
+      if (it.conFecha && !mk) extra += `<div class="vx"><span>Fecha</span>${fechaInp(it.codigo, v[it.codigo])}</div>`;
+      for (const o of it.opciones) if (o.conFecha && v[o.codigo] === 1) extra += `<div class="vx"><span>Fecha · ${esc(o.etiqueta)}</span>${fechaInp(o.codigo + "_date", v[o.codigo + "_date"])}</div>`;
+      break;
+    }
+    case "numero":
+    case "entero": {
+      const x = v[it.codigo];
+      const fuera = x != null && ((it.min != null && x < it.min) || (it.max != null && x > it.max));
+      ctrl = `<input class="inp num ${fuera ? "fuera" : ""}" data-in="${k}" data-t="${it.tipoCampo}" data-foco="${k}" inputmode="decimal" value="${x == null ? "" : String(x).replace(".", ",")}" title="${fuera ? "Fuera del rango esperado. " : ""}${it.min != null && it.max != null ? `Rango: ${it.min}–${it.max}` : ""}">${it.unidad ? `<span class="v-un">${esc(it.unidad)}</span>` : ""}`;
+      break;
+    }
+    case "fecha": ctrl = fechaInp(it.codigo, v[it.codigo]); break;
+    default:
+      ancho = true;
+      ctrl = `<input class="inp vtxt" data-in="${k}" data-t="texto" data-foco="${k}" value="${esc(v[it.codigo] || "")}" placeholder="Texto libre…">`;
+  }
+  if (mk === DUDA) extra += `<div class="vx duda">${icono("bandera")}<input class="inp vtxt" data-in="${k}_duda_nota" data-t="texto" data-foco="${k}_duda_nota" placeholder="¿Cuál es la duda?" value="${esc(v[it.codigo + "_duda_nota"] || "")}"></div>`;
+  return `<div class="vf ${resp ? "resp" : cuenta ? "falta" : ""} ${mk === DUDA ? "con-duda" : ""} ${ancho ? "ancho" : ""} ${pendIA ? "ia-pend" + (mIA.aviso ? " ia-aviso" : "") : ""}" data-k="${k}">
+    <div class="vl" title="${tip}"><span>${esc(it.etiqueta)}</span>${it.provisional ? `<sup title="Código provisional (no existe en el CRF oficial)">P</sup>` : ""}${chipIA}</div><div class="vc">${ctrl}</div>${extra}</div>`;
+}
+
+/** Teclado del Modo Vintage: S / N / ? / D contestan y pasan a la siguiente; flechas para moverse. */
+function teclaVintage(ev) {
+  if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  const fila = ev.target.closest(".vf");
+  if (!fila) return;
+  const filas = $$("#seccion .vf"), i = filas.indexOf(fila);
+  const enTexto = ["INPUT", "TEXTAREA"].includes(ev.target.tagName);
+  if ((ev.key === "ArrowDown" || ev.key === "ArrowUp") && ev.target.tagName !== "SELECT") {
+    const dest = enfocable(filas[i + (ev.key === "ArrowDown" ? 1 : -1)]);
+    if (dest) { ev.preventDefault(); dest.focus(); }
+    return;
+  }
+  if (enTexto || ev.target.tagName === "SELECT") return;
+  if (ev.key === "ArrowRight" || ev.key === "ArrowLeft") {
+    const bs = [...fila.querySelectorAll(".vc button:not(.ia-chip)")], j = bs.indexOf(ev.target);
+    const dest = bs[j + (ev.key === "ArrowRight" ? 1 : -1)];
+    if (dest) { ev.preventDefault(); dest.focus(); }
+    return;
+  }
+  if (soloLectura()) return;
+  const it = S.modelo.porCodigo[fila.dataset.k];
+  const t = ev.key.toLowerCase();
+  let b = null;
+  if (["sino", "sinofecha"].includes(it?.tipoCampo)) {
+    if (t === "s") b = fila.querySelector('[data-sino][data-val="1"]');
+    if (t === "n") b = fila.querySelector('[data-sino][data-val="0"]');
+  }
+  if (ev.key === "?" || ev.key === "¿") b = fila.querySelector('[data-marca="NC"]');
+  if (t === "d") b = fila.querySelector('[data-marca="DUDA"]');
+  if (!b) return;
+  ev.preventDefault();
+  const esDuda = b.dataset.marca === DUDA;
+  if (b.classList.contains("on")) { if (!esDuda) enfocable(filas[i + 1])?.focus(); return; }  // ya estaba: solo avanza
+  if (!esDuda) E.avanzar = { k: fila.dataset.k, paso: 1 };  // la duda deja el foco en su nota
+  b.click();
 }
 
 function campoHTML(it, v, animar) {
@@ -905,6 +1069,7 @@ function alClicar(ev) {
     if (m === DUDA && cambios[k] === DUDA) setTimeout(() => $(`[data-foco="${CSS.escape(k + "_duda_nota")}"]`)?.focus(), 60);
   } else if (b.dataset.sino) {
     const k = b.dataset.sino, val = +b.dataset.val;
+    if (E.vintage && v[k] === val) return aplicar({ [k]: null, ...(v[k + "_date"] ? { [k + "_date"]: null } : {}) });
     const cambios = { [k]: val };
     if (val === 0 && v[k + "_date"]) cambios[k + "_date"] = null;
     if (v[k + "_duda_nota"]) cambios[k + "_duda_nota"] = null;
@@ -961,6 +1126,13 @@ function mascaraFecha(el, ev) {
 function alCambiar(ev) {
   if (soloLectura()) return;
   const el = ev.target;
+  if (el.dataset.sel) {  // desplegable de selección única (Modo Vintage)
+    const g = S.modelo.porCodigo[el.dataset.sel], o = el.value, v = E.caso.valores, cambios = {};
+    if (esMarca(v[g.codigo])) { cambios[g.codigo] = null; cambios[g.codigo + "_duda_nota"] = null; }
+    g.opciones.forEach((x) => { cambios[x.codigo] = o ? (x.codigo === o ? 1 : 0) : null; if (x.codigo !== o) cambios[x.codigo + "_date"] = null; });
+    for (const k of Object.keys(cambios)) if (cambios[k] === null && v[k] == null) delete cambios[k];
+    return aplicar(cambios);
+  }
   if (!el.dataset.in) return;
   const k = el.dataset.in, t = el.dataset.t;
   let val = el.value.trim();
@@ -1128,7 +1300,7 @@ function irAPendienteIA() {
     E.tab = t.id;
     history.replaceState(null, "", `#/caso/${c.numero}/${encodeURIComponent(t.id)}`);
     pintarCaso();
-    const el = $(`.campo[data-k="${CSS.escape(it.codigo)}"]`);
+    const el = $(`#seccion [data-k="${CSS.escape(it.codigo)}"]`);
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
     el?.classList.add("destello");
     return;
