@@ -48,6 +48,28 @@ Tailscale crea una red cifrada entre sus equipos sin abrir puertos.
    desde la consola de Tailscale (login.tailscale.com → Users → Invite).
 4. En la consola de Tailscale, anote el nombre del NAS, por ejemplo `idoctornas`. Con MagicDNS
    activado se llega a él como `idoctornas` o `idoctornas.<su-red>.ts.net`.
+5. **Reglas de acceso (antes de invitar a nadie).** Por defecto Tailscale deja que todos los equipos
+   de la red lleguen a todo: un colaborador podría ver DSM, las carpetas del NAS y su Mac.
+   Consola de Tailscale → **Access controls** → sustituya la política por esta (ponga su correo y,
+   cuando los invite, los de los colaboradores):
+   ```json
+   {
+     "groups": {
+       "group:admin":        ["su-correo@ejemplo.com"],
+       "group:colaboradores": []
+     },
+     "hosts": { "nas": "100.x.y.z" },
+     "acls": [
+       { "action": "accept", "src": ["group:admin"],         "dst": ["*:*"] },
+       { "action": "accept", "src": ["group:colaboradores"], "dst": ["nas:8443"] }
+     ]
+   }
+   ```
+   (`100.x.y.z` es la IP de Tailscale del NAS, la que aparece junto a su nombre en la consola.)
+
+   Importante: el paquete Tailscale de Synology entrega lo que llega por la red privada como si
+   viniera del propio NAS. Por eso **el cortafuegos de DSM no filtra el tráfico de Tailscale**: lo
+   que de verdad limita a los colaboradores son estas reglas.
 
 (Alternativa sin Tailscale: el paquete **VPN Server** de Synology con WireGuard u OpenVPN, que sí
 exige abrir un puerto UDP en el router.)
@@ -60,12 +82,19 @@ exige abrir un puerto UDP en el router.)
    ```
 2. En el Finder: Ir → Conectarse al servidor → `smb://idoctornas` → carpeta compartida **docker**
    (si no existe, créela en DSM con File Station). Dentro, cree la carpeta **willem**.
-3. Copie dentro de `docker/willem/`:
-   - la carpeta entera `~/WILLEM/registro-willem` → quedará `docker/willem/registro-willem/`
-   - el archivo `registro-willem/nas/docker-compose.yml` → quedará `docker/willem/docker-compose.yml`
+3. Copie dentro de `docker/willem/` **solo los archivos del proyecto, sin su base local**
+   (`registro-willem/datos/` del Mac no debe ir al NAS). Lo más seguro, en Terminal:
+   ```bash
+   cd ~/WILLEM && git archive HEAD registro-willem | tar -x -C /Volumes/docker/willem
+   cp registro-willem/nas/docker-compose.yml /Volumes/docker/willem/
+   mkdir -p /Volumes/docker/willem/datos
+   ```
+   Quedarán `docker/willem/registro-willem/`, `docker/willem/docker-compose.yml` y la carpeta
+   vacía `docker/willem/datos/`. **Créela usted**: Synology no la crea sola y, sin ella, el
+   contenedor no arranca («Bind mount failed: … datos does not exist»).
 
-La base de datos se creará sola en `docker/willem/datos/`. Para actualizar la aplicación más
-adelante basta con sustituir la carpeta `registro-willem`: los datos están aparte.
+La base de datos se creará sola dentro de `datos/`. Para actualizar la aplicación más adelante
+basta con sustituir la carpeta `registro-willem`: los datos están aparte.
 
 ## 4. Crear el contenedor (Container Manager)
 
@@ -78,9 +107,11 @@ adelante basta con sustituir la carpeta `registro-willem`: los datos están apar
 3. Siguiente → Hecho. Se construye la imagen (un par de minutos) y arranca el contenedor
    `willem-registro`. Debe aparecer **en ejecución** y, al poco, «healthy» (sano).
 
-Qué hace el contenedor: solo escucha dentro del propio NAS (127.0.0.1:8765), con el sistema de
-archivos en solo lectura, sin libro llave, con el doble factor obligatorio y con una copia diaria
-de la base de datos en `datos/copias` (se guardan 14 días).
+Qué hace el contenedor: escucha en 127.0.0.1:8765 del NAS, con el sistema de archivos en solo
+lectura, sin libro llave, con el doble factor obligatorio y con una copia diaria de la base de
+datos en `datos/copias` (se guardan 14 días). Al arrancar crea `datos/clave_proxy.txt`: **solo
+atiende las peticiones que traen esa clave**, que añade el proxy del paso 5. Así, aunque alguien
+llegue al 8765 por otra vía (el Tailscale de Synology lo hace posible), recibe «403».
 
 ## 5. HTTPS: proxy inverso de DSM
 
@@ -97,6 +128,11 @@ Panel de control → Portal de inicio de sesión → **Avanzado** → **Proxy in
 | Destino · Nombre de host | `localhost` |
 | Destino · Puerto | **8765** |
 
+Después, en esa misma regla → **Encabezado personalizado** → Crear → Crear:
+nombre `X-Willem-Proxy`, valor = el contenido de `docker/willem/datos/clave_proxy.txt`
+(en el Mac: `tr -d '\n' < /Volumes/docker/willem/datos/clave_proxy.txt | pbcopy` y pegar con ⌘V;
+luego vacíe el portapapeles). Sin esta cabecera el registro responde «403».
+
 El NAS usa su propio certificado. La primera vez, el navegador avisará de que «no es de confianza»:
 es normal en una red privada. Compruebe la huella del certificado y acéptelo. La estación del Mac
 también le pedirá confirmar la huella una vez y, a partir de ahí, solo hablará con ese certificado.
@@ -111,6 +147,9 @@ Panel de control → Seguridad → **Cortafuegos** → activar → Editar reglas
 3. Al final: **Denegar** todo lo demás.
 
 Cuidado: cree primero las reglas de «Permitir» para su propia red, o podría quedarse sin acceso a DSM.
+
+Este cortafuegos protege frente a la red de casa. Frente a la red de Tailscale no sirve (véase el
+paso 2.5): allí mandan las reglas de acceso de Tailscale.
 
 ## 7. Primera puesta en marcha del registro
 
@@ -145,8 +184,10 @@ Además, con **Hyper Backup**:
 ## 10. Actualizar la aplicación
 
 1. En el Mac: `cd ~/WILLEM && git pull`.
-2. Sustituya `docker/willem/registro-willem` por la carpeta nueva.
-3. Container Manager → Proyecto → `willem` → Acción → **Construir** (o Detener → Construir → Iniciar).
+2. Sustituya `docker/willem/registro-willem` por la carpeta nueva (con `git archive`, como en el paso 3).
+3. Container Manager → Proyecto → `willem` → Acción → **Detener** → **Limpiar**. Luego, en
+   **Imagen**, elimine `willem-registro:local` (si no, «Crear» reutiliza la imagen vieja).
+   Por último, Proyecto → `willem` → Acción → **Crear**: reconstruye y arranca.
 
 Los datos (`docker/willem/datos`) no se tocan.
 
@@ -156,7 +197,9 @@ Los datos (`docker/willem/datos`) no se tocan.
 - [ ] Ningún puerto abierto en el router; QuickConnect sin usar para el registro.
 - [ ] Tailscale en el NAS, en el Mac y en cada colaborador.
 - [ ] Contenedor `willem-registro` en ejecución y sano.
-- [ ] Proxy inverso HTTPS 8443 → localhost:8765.
+- [ ] Proxy inverso HTTPS 8443 → localhost:8765, con la cabecera `X-Willem-Proxy`.
+- [ ] `http://<nas>:8765` responde «403» desde otro equipo de Tailscale.
+- [ ] Reglas de acceso de Tailscale: los colaboradores solo llegan a `nas:8443`.
 - [ ] Cortafuegos: 8443 solo desde Tailscale; DSM solo desde casa y Tailscale.
 - [ ] Primer data manager con doble factor y códigos de recuperación guardados.
 - [ ] Estación del Mac apuntando a `https://…:8443` con el certificado confirmado.

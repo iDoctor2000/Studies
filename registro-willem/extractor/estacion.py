@@ -77,9 +77,14 @@ def huella_bonita(h):
 
 
 def huella_servidor(url):
+    # Sin ssl.get_server_certificate(timeout=…): no existe en el Python 3.9 de Apple
     p = urllib.parse.urlparse(url)
-    pem = ssl.get_server_certificate((p.hostname, p.port or 443), timeout=5)
-    return hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem)).hexdigest()
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE  # solo se lee el certificado para mostrar su huella
+    with socket.create_connection((p.hostname, p.port or 443), timeout=5) as s:
+        with ctx.wrap_socket(s, server_hostname=p.hostname) as t:
+            return hashlib.sha256(t.getpeercert(binary_form=True)).hexdigest()
 
 
 class _ConexionFijada(http.client.HTTPSConnection):

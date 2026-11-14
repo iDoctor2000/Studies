@@ -790,8 +790,28 @@ class Manejador(BaseHTTPRequestHandler):
     def do_DELETE(self):
         self._despachar("DELETE")
 
+    def _desde_el_proxy(self, url):
+        """En el NAS solo se atiende lo que llega por el proxy inverso HTTPS de DSM, que añade la
+        cabecera X-Willem-Proxy con la clave de <datos>/clave_proxy.txt. Así, aunque el puerto 8765
+        se alcance por otra vía (p. ej. el Tailscale de Synology reenvía la red privada a localhost),
+        sin la clave no se puede usar. La comprobación de salud del propio contenedor queda exenta."""
+        if not CFG.get("clave_proxy"):
+            return True
+        if self.client_address[0] == "127.0.0.1" and url.path == "/api/estado":
+            return True
+        recibida = (self.headers.get("X-Willem-Proxy") or "").strip().encode()
+        return hmac.compare_digest(recibida, CFG["clave_proxy"].encode())
+
     def _despachar(self, metodo):
         url = urlparse(self.path)
+        if not self._desde_el_proxy(url):
+            data = "Acceso solo a través del proxy HTTPS del NAS.\n".encode()
+            self.send_response(403)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         try:
             if not url.path.startswith("/api/"):
                 if metodo != "GET":
@@ -1265,6 +1285,26 @@ def siguiente_numero(con_llave=None):
     return m + 1
 
 
+def clave_proxy(carpeta):
+    """Clave que el proxy inverso de DSM debe enviar en la cabecera X-Willem-Proxy.
+    Se crea sola la primera vez en <datos>/clave_proxy.txt (o se toma de WILLEM_CLAVE_PROXY)."""
+    clave = (os.environ.get("WILLEM_CLAVE_PROXY") or "").strip()
+    if clave:
+        return clave
+    ruta = os.path.join(carpeta, "clave_proxy.txt")
+    try:
+        with open(ruta, encoding="utf-8") as f:
+            clave = f.read().strip()
+    except FileNotFoundError:
+        pass
+    if not clave:
+        clave = secrets.token_urlsafe(32)
+        with open(ruta, "w", encoding="utf-8") as f:
+            f.write(clave + "\n")
+        os.chmod(ruta, 0o600)
+    return clave
+
+
 # ===========================================================================
 def main():
     ap = argparse.ArgumentParser(description="Registro WILLEM – servidor local")
@@ -1297,6 +1337,8 @@ def main():
         demo.poblar(CFG["db"], CFG["llave"], hash_pw, diagnosticos)
     diccionario()
 
+    if a.nas:
+        CFG["clave_proxy"] = clave_proxy(a.datos)
     if a.nas and not a.demo:
         # Copia diaria en <datos>/copias (las copias de seguridad del NAS deben incluir esa carpeta)
         threading.Thread(target=copias_diarias, args=(os.path.join(a.datos, "copias"),), daemon=True).start()
