@@ -1266,6 +1266,23 @@ def siguiente_numero(con_llave=None):
 
 
 # ===========================================================================
+def ip_local():
+    """Dirección de este equipo en la red local (no envía nada: solo pregunta por dónde saldría)."""
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("10.255.255.255", 1))
+        ip = s.getsockname()[0]
+    except OSError:
+        try:
+            ip = socket.gethostbyname(socket.gethostname())
+        except OSError:
+            ip = None
+    finally:
+        s.close()
+    return ip if ip and not ip.startswith("127.") else None
+
+
 def main():
     ap = argparse.ArgumentParser(description="Registro WILLEM – servidor local")
     ap.add_argument("--red", action="store_true", help="Permitir acceso desde otros PCs de la red local")
@@ -1315,12 +1332,13 @@ def main():
     if a.nas:
         print("  Acceso: a través del proxy inverso HTTPS del NAS (este puerto no debe publicarse fuera del NAS)")
     elif a.red:
-        import socket
-        try:
-            ip = socket.gethostbyname(socket.gethostname())
-            print(f"  Desde otros PCs de la red: {'https' if a.certificado else 'http'}://{ip}:{a.puerto}")
-        except OSError:
-            pass
+        ip = ip_local()
+        if ip:
+            print(f"  Desde otros equipos de la misma red (PC, iPad, móvil): {'https' if a.certificado else 'http'}://{ip}:{a.puerto}")
+        else:
+            print("  No se ha podido averiguar la dirección de este equipo en la red (¿está conectado a la wifi?).")
+        if not a.certificado:
+            print("  AVISO: sin HTTPS, lo que se escribe viaja sin cifrar por la red local. Úselo solo en una red de confianza.")
     print(f"  Base de datos: {CFG['db']}" + ("   (carpeta de red)" if CFG["red_fs"] else ""))
     if CFG["red_fs"]:
         print("  AVISO: con la base en una carpeta de red, abra el servidor en UN SOLO ordenador a la vez.")
