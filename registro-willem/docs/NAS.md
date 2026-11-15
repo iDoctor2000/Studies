@@ -52,39 +52,28 @@ Tailscale crea una red cifrada entre sus equipos sin abrir puertos.
    Importante: Tailscale tiene que estar instalado en el equipo de cada persona. **No se entra desde
    los ordenadores corporativos del hospital**: cada persona usa un ordenador propio o dedicado a
    esto, desde su casa o desde donde esté (ver «Equipos de los colaboradores», más abajo).
-4. **Que los invitados solo lleguen al registro.** En la consola de Tailscale → **Access controls**,
-   deje estas dos reglas (sustituyen a la regla por defecto, que lo permite todo):
-   ```json
-   {
-     "acls": [
-       { "action": "accept", "src": ["autogroup:member"], "dst": ["*:*"] },
-       { "action": "accept", "src": ["autogroup:shared"], "dst": ["*:8443"] }
-     ]
-   }
-   ```
-   La primera es para usted (sus propios equipos lo ven todo). La segunda hace que las personas a
-   las que comparte el NAS solo puedan abrir el puerto del registro (8443): **ni DSM, ni las
-   carpetas, ni nada más del NAS**.
-5. En la consola de Tailscale, anote el nombre del NAS, por ejemplo `idoctornas`. Con MagicDNS
+4. En la consola de Tailscale, anote el nombre del NAS, por ejemplo `idoctornas`. Con MagicDNS
    activado se llega a él como `idoctornas` o `idoctornas.<su-red>.ts.net`.
-5. **Reglas de acceso (antes de invitar a nadie).** Por defecto Tailscale deja que todos los equipos
-   de la red lleguen a todo: un colaborador podría ver DSM, las carpetas del NAS y su Mac.
-   Consola de Tailscale → **Access controls** → sustituya la política por esta (ponga su correo y,
-   cuando los invite, los de los colaboradores):
+5. **Reglas de acceso (antes de compartir el NAS con nadie).** Por defecto Tailscale deja que todos
+   los equipos lleguen a todo: un colaborador podría ver DSM y las carpetas del NAS.
+   Consola de Tailscale → **Access controls** → sustituya la política por esta (ponga su correo):
    ```json
    {
-     "groups": {
-       "group:admin":        ["su-correo@ejemplo.com"],
-       "group:colaboradores": []
-     },
-     "hosts": { "nas": "100.x.y.z" },
+     "groups": { "group:admin": ["su-correo@ejemplo.com"] },
+     "hosts":  { "nas": "100.x.y.z" },
      "acls": [
-       { "action": "accept", "src": ["group:admin"],         "dst": ["*:*"] },
-       { "action": "accept", "src": ["group:colaboradores"], "dst": ["nas:8443"] }
+       { "action": "accept", "src": ["group:admin"],      "dst": ["*:*"] },
+       { "action": "accept", "src": ["autogroup:shared"], "dst": ["nas:8443"] }
      ]
    }
    ```
    (`100.x.y.z` es la IP de Tailscale del NAS, la que aparece junto a su nombre en la consola.)
+   La primera regla es para usted: sus equipos lo ven todo. La segunda es para las personas con las
+   que comparte el NAS (paso 3): solo pueden abrir el puerto del registro (8443), **ni DSM, ni las
+   carpetas, ni nada más**. No hay que añadir a nadie a mano: vale para todo el que acepte su
+   invitación, y deja de valer en cuanto le retire el NAS compartido.
+   **Compruébelo con el primer colaborador**: debe poder abrir `https://idoctornas:8443` y **no**
+   debe poder abrir DSM (`https://idoctornas:5001`).
 
    Importante: el paquete Tailscale de Synology entrega lo que llega por la red privada como si
    viniera del propio NAS. Por eso **el cortafuegos de DSM no filtra el tráfico de Tailscale**: lo
@@ -163,7 +152,7 @@ Panel de control → Seguridad → **Cortafuegos** → activar → Editar reglas
 1. Permitir **8443** desde la red de Tailscale: IP de origen «Subred» `100.64.0.0`, máscara `255.192.0.0`.
 2. Permitir los puertos de DSM (5000/5001) y SMB **solo** desde su red de casa (p. ej. `192.168.1.0/24`).
    Si quiere administrar el NAS desde fuera, hágalo con sus propios equipos por Tailscale; las reglas
-   del paso 2.4 impiden que los invitados lleguen a esos puertos.
+   del paso 2.5 impiden que los invitados lleguen a esos puertos.
 3. Al final: **Denegar** todo lo demás.
 
 Cuidado: cree primero las reglas de «Permitir» para su propia red, o podría quedarse sin acceso a DSM.
