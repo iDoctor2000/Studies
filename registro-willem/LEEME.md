@@ -270,6 +270,24 @@ validados nunca cambian. Después se vuelve al paso 1 para ver si el acierto ha 
 Por línea de comandos: `extraer_ia.py --variables resting_heart_rate,echocardiography_lvef` y
 `--pistas archivo.json`.
 
+## Perfiles de usuario (modo servidor y NAS)
+
+| Perfil | Qué puede hacer |
+|---|---|
+| **Introducción de datos** | crear y rellenar casos (modo normal y Modo Vintage); un caso validado le queda en solo lectura |
+| **Cardiólogo revisor** | además revisa, corrige y valida casos, ve la Auditoría de la IA y escribe pistas clínicas |
+| **Data manager** | todo: además importa de la IA, exporta, borra casos y gestiona usuarios |
+
+Se eligen en **Usuarios** (al dar de alta o con «Cambiar rol»). Las bases creadas con versiones
+anteriores se actualizan solas al arrancar.
+
+## Probar desde un iPad o un móvil (solo demostración)
+
+Doble clic en **`probar_en_ipad.command`** en el Mac. Abre la demostración (pacientes inventados) para
+la wifi de casa y muestra la dirección que hay que escribir en Safari del iPad (por ejemplo
+`http://192.168.1.20:8770`). Usuario `admin`, contraseña `willem2026`. Va sin HTTPS: **solo para
+pruebas**. El registro de verdad se usa desde el iPad a través del NAS (Tailscale + HTTPS).
+
 ## Registro central en el NAS (fase 3)
 
 Guía completa, paso a paso, en **[docs/NAS.md](docs/NAS.md)**. Resumen:

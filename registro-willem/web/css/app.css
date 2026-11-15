@@ -126,6 +126,7 @@ a { color: var(--brand); text-decoration: none; }
 .tarjeta-usuario .r { font-size: 12px; color: var(--side-ink-2); }
 .tarjeta-usuario button { margin-left: auto; background: none; border: 0; color: var(--side-ink-2); cursor: pointer; padding: 6px; border-radius: 8px; }
 .tarjeta-usuario button:hover { color: #fff; background: rgba(255, 255, 255, .08); }
+.tarjeta-usuario button + button { margin-left: 0; }
 .cinta-demo { font-size: 12px; text-align: center; padding: 7px; border-radius: 10px; background: rgba(245, 158, 11, .14); color: #fbbf24; font-weight: 600; letter-spacing: .04em; }
 .local-ok { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--side-ink-2); padding: 0 6px; }
 .local-ok .ico { width: 16px; height: 16px; color: #34d399; }

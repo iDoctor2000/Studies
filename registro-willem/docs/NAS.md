@@ -44,9 +44,28 @@ Tailscale crea una red cifrada entre sus equipos sin abrir puertos.
 
 1. En el NAS: Centro de paquetes → buscar **Tailscale** → Instalar → Abrir → iniciar sesión con su cuenta.
 2. En el Mac Studio: instalar **Tailscale** (App Store) e iniciar sesión con la misma cuenta.
-3. Cada colaborador: instalar Tailscale en su ordenador y aceptar la invitación que usted le envíe
-   desde la consola de Tailscale (login.tailscale.com → Users → Invite).
-4. En la consola de Tailscale, anote el nombre del NAS, por ejemplo `idoctornas`. Con MagicDNS
+3. Cada colaborador instala Tailscale en el equipo desde el que vaya a trabajar (ordenador, iPad o
+   móvil) y crea **su propia cuenta** gratuita. Usted le **comparte solo el NAS**: consola de
+   Tailscale (login.tailscale.com) → Machines → menú «…» del NAS → **Share…** → enviar el enlace.
+   Así cada persona ve únicamente el NAS, no su Mac ni sus otros equipos, y se le puede retirar el
+   acceso en cualquier momento desde esa misma pantalla.
+   Importante: Tailscale tiene que estar instalado en el equipo de cada persona. **No se entra desde
+   los ordenadores corporativos del hospital**: cada persona usa un ordenador propio o dedicado a
+   esto, desde su casa o desde donde esté (ver «Equipos de los colaboradores», más abajo).
+4. **Que los invitados solo lleguen al registro.** En la consola de Tailscale → **Access controls**,
+   deje estas dos reglas (sustituyen a la regla por defecto, que lo permite todo):
+   ```json
+   {
+     "acls": [
+       { "action": "accept", "src": ["autogroup:member"], "dst": ["*:*"] },
+       { "action": "accept", "src": ["autogroup:shared"], "dst": ["*:8443"] }
+     ]
+   }
+   ```
+   La primera es para usted (sus propios equipos lo ven todo). La segunda hace que las personas a
+   las que comparte el NAS solo puedan abrir el puerto del registro (8443): **ni DSM, ni las
+   carpetas, ni nada más del NAS**.
+5. En la consola de Tailscale, anote el nombre del NAS, por ejemplo `idoctornas`. Con MagicDNS
    activado se llega a él como `idoctornas` o `idoctornas.<su-red>.ts.net`.
 5. **Reglas de acceso (antes de invitar a nadie).** Por defecto Tailscale deja que todos los equipos
    de la red lleguen a todo: un colaborador podría ver DSM, las carpetas del NAS y su Mac.
@@ -142,8 +161,9 @@ también le pedirá confirmar la huella una vez y, a partir de ahí, solo hablar
 Panel de control → Seguridad → **Cortafuegos** → activar → Editar reglas del perfil:
 
 1. Permitir **8443** desde la red de Tailscale: IP de origen «Subred» `100.64.0.0`, máscara `255.192.0.0`.
-2. Permitir los puertos de DSM (5000/5001) y SMB **solo** desde su red de casa (p. ej. `192.168.1.0/24`)
-   y desde Tailscale.
+2. Permitir los puertos de DSM (5000/5001) y SMB **solo** desde su red de casa (p. ej. `192.168.1.0/24`).
+   Si quiere administrar el NAS desde fuera, hágalo con sus propios equipos por Tailscale; las reglas
+   del paso 2.4 impiden que los invitados lleguen a esos puertos.
 3. Al final: **Denegar** todo lo demás.
 
 Cuidado: cree primero las reglas de «Permitir» para su propia red, o podría quedarse sin acceso a DSM.
@@ -158,12 +178,50 @@ paso 2.5): allí mandan las reglas de acceso de Tailscale.
 3. Active el **doble factor**: escanee el código QR con Google Authenticator, Microsoft
    Authenticator o la app Contraseñas del iPhone, y escriba el código de 6 cifras.
 4. **Guarde los 8 códigos de recuperación** en un sitio seguro, nunca junto al libro llave.
-5. Usuarios → dé de alta al equipo. Cada persona activará su doble factor la primera vez que entre.
+5. Usuarios → dé de alta al equipo, cada persona con **su propio usuario** y el perfil que le toca:
+
+   | Perfil | Para quién | Qué puede hacer |
+   |---|---|---|
+   | **Introducción de datos** | personal que mete casos | crear y rellenar casos (modo normal y Modo Vintage); no puede tocar un caso ya validado |
+   | **Cardiólogo revisor** | cardiólogos que revisan | lo anterior y además revisar, corregir y **validar** casos, ver la **Auditoría de la IA** y escribir pistas clínicas |
+   | **Data manager** | quien administra el registro | todo: además **importa de la IA**, exporta el Excel, borra casos y gestiona usuarios |
+
+   Solo el data manager puede importar de la IA, y además hace falta la Estación del Mac, que es
+   donde están las propuestas. Lo recomendable es que haya un único data manager.
+   Cada persona activará su doble factor la primera vez que entre.
+   Póngales una contraseña inicial y pídales que la cambien al entrar (icono de la llave, junto a
+   su nombre). La hoja **[EQUIPO.md](EQUIPO.md)** explica a cada persona lo que tiene que hacer.
    Si alguien cambia de móvil: Usuarios → «Reiniciar doble factor».
+6. **Desde un iPad o un móvil**: con Tailscale activado, abrir `https://idoctornas:8443` en Safari,
+   aceptar el certificado la primera vez y, si se quiere, Compartir → «Añadir a pantalla de inicio».
 
 Protecciones de la web: 5 contraseñas o códigos erróneos bloquean la cuenta 15 minutos (un data
 manager puede desbloquearla). 20 intentos fallidos desde un mismo equipo bloquean ese equipo
 15 minutos. La sesión caduca a las 12 horas.
+
+## Equipos de los colaboradores
+
+El registro no se abre a Internet ni se usa desde los ordenadores del hospital. Cada persona entra
+desde un ordenador **propio o dedicado**, en su casa o donde esté, con estas condiciones mínimas:
+
+- **Tailscale** instalado y con su propia cuenta (paso 2).
+- **Disco cifrado**: FileVault en Mac, BitLocker o «Cifrado del dispositivo» en Windows.
+- Cuenta de usuario **con contraseña** y bloqueo automático de pantalla. Si el ordenador es
+  compartido con la familia, una cuenta de usuario aparte para esto.
+- Sistema y navegador **actualizados**.
+- No guardar la contraseña del registro en un navegador compartido ni hacer capturas o copias de
+  los datos.
+
+El registro es una página web: **en el ordenador de cada persona no queda guardado ningún dato**.
+Para el Modo Vintage hace falta pantalla de portátil o de escritorio; en un iPad se usa el modo normal.
+
+Qué se puede hacer desde casa: revisar y completar los casos que ha rellenado la IA, porque cada
+caso lleva guardado el **texto anonimizado del informe** («Ver en el informe»). Lo que exija
+consultar la historia clínica solo se puede hacer en el hospital: allí se mira la historia en el
+ordenador del hospital y se escribe en el portátil propio, conectado con los datos del móvil.
+
+Si alguien deja el proyecto o pierde el equipo: desactive su usuario en el registro (Usuarios) y
+retírele el NAS compartido en la consola de Tailscale.
 
 ## 8. Conectar la Estación de informes del Mac
 
@@ -195,7 +253,8 @@ Los datos (`docker/willem/datos`) no se tocan.
 
 - [ ] DSM actualizado, `admin` desactivado, doble factor en DSM.
 - [ ] Ningún puerto abierto en el router; QuickConnect sin usar para el registro.
-- [ ] Tailscale en el NAS, en el Mac y en cada colaborador.
+- [ ] Tailscale en el NAS, en el Mac y en cada colaborador; los invitados solo llegan al puerto 8443.
+- [ ] Equipos de los colaboradores con disco cifrado, contraseña y bloqueo de pantalla.
 - [ ] Contenedor `willem-registro` en ejecución y sano.
 - [ ] Proxy inverso HTTPS 8443 → localhost:8765, con la cabecera `X-Willem-Proxy`.
 - [ ] `http://<nas>:8765` responde «403» desde otro equipo de Tailscale.
