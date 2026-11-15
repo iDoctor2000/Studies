@@ -977,6 +977,30 @@ class Manejador(BaseHTTPRequestHandler):
         self._json({"ok": True}, headers={"Set-Cookie": "willem_sid=; Path=/; Max-Age=0"})
 
     # ---- diccionario -------------------------------------------------------
+    def api_post_clave(self, p, q):
+        """Cada persona cambia su propia contraseña (hay que saber la actual)."""
+        u = self._usuario()
+        b = self._cuerpo()
+        nueva = b.get("nueva") or ""
+        m = re.search(r"willem_sid=([A-Za-z0-9_\-]+)", self.headers.get("Cookie") or "")
+        self._comprobar_ip()
+        self._bloqueado(u)
+        if not comprobar_pw(b.get("actual") or "", u["hash"]):
+            with db() as con:
+                self._fallo(con, u)
+            raise Error(403, "La contraseña actual no es correcta")
+        with LOCK, db() as con:
+            if len(nueva) < 8:
+                raise Error(400, "La contraseña nueva debe tener al menos 8 caracteres")
+            if nueva == b.get("actual"):
+                raise Error(400, "La contraseña nueva debe ser distinta de la actual")
+            con.execute("UPDATE usuarios SET hash=?, fallos=0 WHERE id=?", (hash_pw(nueva), u["id"]))
+            # se cierran sus otras sesiones abiertas (otros navegadores o equipos)
+            con.execute("DELETE FROM sesiones WHERE usuario_id=? AND token<>?", (u["id"], m.group(1) if m else ""))
+            con.execute("INSERT INTO auditoria(numero,usuario,fecha,campo,antes,despues,origen) VALUES(NULL,?,?,?,NULL,NULL,?)",
+                        (u["usuario"], ahora(), "(contraseña cambiada por el propio usuario)", "cuenta"))
+        self._json({"ok": True})
+
     def api_get_diccionario(self, p, q):
         self._usuario()
         self._json(diccionario())

@@ -150,6 +150,8 @@ Cuidado: cree primero las reglas de «Permitir» para su propia red, o podría q
    Solo el data manager puede importar de la IA, y además hace falta la Estación del Mac, que es
    donde están las propuestas. Lo recomendable es que haya un único data manager.
    Cada persona activará su doble factor la primera vez que entre.
+   Póngales una contraseña inicial y pídales que la cambien al entrar (icono de la llave, junto a
+   su nombre). La hoja **[EQUIPO.md](EQUIPO.md)** explica a cada persona lo que tiene que hacer.
    Si alguien cambia de móvil: Usuarios → «Reiniciar doble factor».
 6. **Desde un iPad o un móvil**: con Tailscale activado, abrir `https://idoctornas:8443` en Safari,
    aceptar el certificado la primera vez y, si se quiere, Compartir → «Añadir a pantalla de inicio».

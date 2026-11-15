@@ -428,6 +428,7 @@ function pintarEstructura() {
         <div class="tarjeta-usuario">
           <div class="avatar" style="background:${colorDe(S.yo.usuario)}">${esc(iniciales(S.yo.nombre))}</div>
           <div style="min-width:0"><div class="n">${esc(S.yo.nombre)}</div><div class="r">${NOMBRE_ROL[S.yo.rol] || "Introducción de datos"}</div></div>
+          ${navegador() ? "" : `<button id="btnClave" title="Cambiar mi contraseña">${icono("llave")}</button>`}
           <button id="btnSalir" title="${navegador() ? "Cambiar de usuario" : "Cerrar sesión"}">${icono("salir")}</button>
         </div>
       </div>
@@ -440,6 +441,18 @@ function pintarEstructura() {
   $("#btnMenu").onclick = () => menu(!$(".lateral").classList.contains("abierto"));
   $("#veloMenu").onclick = () => menu(false);
   $(".lateral").addEventListener("click", (ev) => { if (ev.target.closest("a")) menu(false); });
+  if ($("#btnClave")) $("#btnClave").onclick = () => modal({
+    titulo: "Cambiar mi contraseña", aceptar: "Cambiar",
+    html: `<form class="form" onsubmit="return false"><label>Contraseña actual<input class="inp" id="ca" type="password" autocomplete="current-password"></label>
+      <label>Contraseña nueva (mín. 8)<input class="inp" id="cn" type="password" autocomplete="new-password"></label>
+      <label>Repita la contraseña nueva<input class="inp" id="cn2" type="password" autocomplete="new-password"></label>
+      <div class="sub">Si se la puso otra persona al darle de alta, cámbiela por una que solo conozca usted. Se cerrarán sus sesiones en otros equipos.</div><div class="error"></div></form>`,
+    alAceptar: async (m) => {
+      if ($("#cn", m).value !== $("#cn2", m).value) throw new Error("Las dos contraseñas nuevas no coinciden");
+      await api("POST", "clave", { actual: $("#ca", m).value, nueva: $("#cn", m).value });
+      toast("Contraseña cambiada");
+    },
+  });
   $("#btnSalir").onclick = async () => {
     await vaciarPendientes();
     if (navegador()) {
@@ -1747,7 +1760,8 @@ async function pUsuarios() {
     titulo: "Nuevo usuario", aceptar: "Crear",
     html: `<form class="form" onsubmit="return false"><label>Nombre y apellidos<input class="inp" id="un"></label><div class="fila"><label>Usuario<input class="inp" id="uu"></label>
       <label>Rol<select class="inp" id="ur"><option value="intro">Introducción de datos</option><option value="rev">Cardiólogo revisor</option><option value="dm">Data manager</option></select></label></div>
-      <label>Contraseña inicial (mín. 8)<input class="inp" id="up" type="password"></label><div class="error"></div></form>`,
+      <label>Contraseña inicial (mín. 8)<input class="inp" id="up" type="password"></label>
+      <div class="sub">Désela en persona o por un canal seguro, y pídale que la cambie al entrar (icono de la llave, junto a su nombre).</div><div class="error"></div></form>`,
     alAceptar: async (m) => { await api("POST", "usuarios", { nombre: $("#un", m).value, usuario: $("#uu", m).value, rol: $("#ur", m).value, clave: $("#up", m).value }); toast("Usuario creado"); recargar(); },
   });
   $$("[data-act]").forEach((b) => (b.onclick = async () => { try { await api("PUT", "usuarios/" + b.dataset.act, { activo: b.dataset.a !== "1" }); recargar(); } catch (e) { toast(e.message, "mal"); } }));
