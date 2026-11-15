@@ -44,8 +44,14 @@ Tailscale crea una red cifrada entre sus equipos sin abrir puertos.
 
 1. En el NAS: Centro de paquetes → buscar **Tailscale** → Instalar → Abrir → iniciar sesión con su cuenta.
 2. En el Mac Studio: instalar **Tailscale** (App Store) e iniciar sesión con la misma cuenta.
-3. Cada colaborador: instalar Tailscale en su ordenador y aceptar la invitación que usted le envíe
-   desde la consola de Tailscale (login.tailscale.com → Users → Invite).
+3. Cada colaborador instala Tailscale en el equipo desde el que vaya a trabajar (ordenador, iPad o
+   móvil) y crea **su propia cuenta** gratuita. Usted le **comparte solo el NAS**: consola de
+   Tailscale (login.tailscale.com) → Machines → menú «…» del NAS → **Share…** → enviar el enlace.
+   Así cada persona ve únicamente el NAS, no su Mac ni sus otros equipos, y se le puede retirar el
+   acceso en cualquier momento desde esa misma pantalla.
+   Importante: Tailscale tiene que estar instalado en el equipo de cada persona. En los ordenadores
+   corporativos del hospital normalmente no se puede instalar: en ese caso se usa un portátil o un
+   iPad propio (con la wifi o con los datos del móvil).
 4. En la consola de Tailscale, anote el nombre del NAS, por ejemplo `idoctornas`. Con MagicDNS
    activado se llega a él como `idoctornas` o `idoctornas.<su-red>.ts.net`.
 
@@ -119,8 +125,20 @@ Cuidado: cree primero las reglas de «Permitir» para su propia red, o podría q
 3. Active el **doble factor**: escanee el código QR con Google Authenticator, Microsoft
    Authenticator o la app Contraseñas del iPhone, y escriba el código de 6 cifras.
 4. **Guarde los 8 códigos de recuperación** en un sitio seguro, nunca junto al libro llave.
-5. Usuarios → dé de alta al equipo. Cada persona activará su doble factor la primera vez que entre.
+5. Usuarios → dé de alta al equipo, cada persona con **su propio usuario** y el perfil que le toca:
+
+   | Perfil | Para quién | Qué puede hacer |
+   |---|---|---|
+   | **Introducción de datos** | personal que mete casos | crear y rellenar casos (modo normal y Modo Vintage); no puede tocar un caso ya validado |
+   | **Cardiólogo revisor** | cardiólogos que revisan | lo anterior y además revisar, corregir y **validar** casos, ver la **Auditoría de la IA** y escribir pistas clínicas |
+   | **Data manager** | quien administra el registro | todo: además **importa de la IA**, exporta el Excel, borra casos y gestiona usuarios |
+
+   Solo el data manager puede importar de la IA, y además hace falta la Estación del Mac, que es
+   donde están las propuestas. Lo recomendable es que haya un único data manager.
+   Cada persona activará su doble factor la primera vez que entre.
    Si alguien cambia de móvil: Usuarios → «Reiniciar doble factor».
+6. **Desde un iPad o un móvil**: con Tailscale activado, abrir `https://idoctornas:8443` en Safari,
+   aceptar el certificado la primera vez y, si se quiere, Compartir → «Añadir a pantalla de inicio».
 
 Protecciones de la web: 5 contraseñas o códigos erróneos bloquean la cuenta 15 minutos (un data
 manager puede desbloquearla). 20 intentos fallidos desde un mismo equipo bloquean ese equipo

@@ -49,6 +49,10 @@ mimetypes.add_type("text/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
 mimetypes.add_type("image/svg+xml", ".svg")
 
+# Perfiles: dm = data manager (todo) · rev = cardiólogo revisor (revisa, corrige y valida casos; auditoría y pistas
+# de la IA; no importa, no exporta, no borra y no gestiona usuarios) · intro = introducción de datos
+ROLES = ("dm", "rev", "intro")
+REVISAN = ("dm", "rev")
 CFG = {"db": None, "llave": None, "demo": False, "nas": False, "2fa": False, "https": False}
 LOCK = threading.Lock()
 
@@ -205,7 +209,7 @@ def iniciar_db():
         con.executescript("""
         CREATE TABLE IF NOT EXISTS usuarios(
             id INTEGER PRIMARY KEY, usuario TEXT UNIQUE NOT NULL, nombre TEXT NOT NULL,
-            rol TEXT NOT NULL CHECK(rol IN ('dm','intro')), hash TEXT NOT NULL,
+            rol TEXT NOT NULL CHECK(rol IN ('dm','intro','rev')), hash TEXT NOT NULL,
             activo INTEGER NOT NULL DEFAULT 1, creado TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS sesiones(
             token TEXT PRIMARY KEY, usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
@@ -234,6 +238,33 @@ def iniciar_db():
                           ("fallos", "INTEGER NOT NULL DEFAULT 0"), ("bloqueado_hasta", "TEXT")):
             if col not in cols_u:
                 con.execute(f"ALTER TABLE usuarios ADD COLUMN {col} {tipo}")
+    migrar_roles()
+
+
+def migrar_roles():
+    """Bases anteriores al perfil «cardiólogo revisor»: se rehace la tabla de usuarios para admitirlo (sin perder nada)."""
+    con = sqlite3.connect(CFG["db"], timeout=30, isolation_level=None)
+    try:
+        sql = con.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='usuarios'").fetchone()[0]
+        if "'rev'" in sql:
+            return
+        nuevo = re.sub(r"CREATE TABLE\s+\"?usuarios\"?\s*\(", "CREATE TABLE usuarios_nueva(", sql, count=1)
+        nuevo = re.sub(r"IN\s*\(\s*'dm'\s*,\s*'intro'\s*\)", "IN ('dm','intro','rev')", nuevo)
+        if nuevo == sql or "'rev'" not in nuevo or "usuarios_nueva" not in nuevo:
+            raise RuntimeError("No se ha podido actualizar la tabla de usuarios")
+        con.execute("PRAGMA foreign_keys=OFF")
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            con.execute(nuevo)
+            con.execute("INSERT INTO usuarios_nueva SELECT * FROM usuarios")
+            con.execute("DROP TABLE usuarios")
+            con.execute("ALTER TABLE usuarios_nueva RENAME TO usuarios")
+            con.execute("COMMIT")
+        except Exception:
+            con.execute("ROLLBACK")
+            raise
+    finally:
+        con.close()
 
 
 def copia_de_seguridad(carpeta, conservar=14):
@@ -746,8 +777,8 @@ class Manejador(BaseHTTPRequestHandler):
                                    WHERE s.token=? AND s.expira>? AND u.activo=1""", (m.group(1), ahora())).fetchone()
         if obligatorio and not u:
             raise Error(401, "Sesión no iniciada o caducada")
-        if rol and u["rol"] != rol:
-            raise Error(403, "Solo los data managers pueden hacer esto")
+        if rol and u["rol"] not in ((rol,) if isinstance(rol, str) else rol):
+            raise Error(403, "Solo los data managers pueden hacer esto" if rol == "dm" else "Su perfil no permite hacer esto")
         return u
 
     def _estatico(self, ruta):
@@ -963,7 +994,7 @@ class Manejador(BaseHTTPRequestHandler):
         self._usuario(rol="dm")
         b = self._cuerpo()
         self._validar_usuario(b)
-        if b.get("rol") not in ("dm", "intro"):
+        if b.get("rol") not in ROLES:
             raise Error(400, "Rol no válido")
         try:
             with LOCK, db() as con:
@@ -991,7 +1022,7 @@ class Manejador(BaseHTTPRequestHandler):
                 if len(b["clave"]) < 8:
                     raise Error(400, "La contraseña debe tener al menos 8 caracteres")
                 con.execute("UPDATE usuarios SET hash=? WHERE id=?", (hash_pw(b["clave"]), uid))
-            if b.get("rol") in ("dm", "intro") and uid != yo["id"]:
+            if b.get("rol") in ROLES and uid != yo["id"]:
                 con.execute("UPDATE usuarios SET rol=? WHERE id=?", (b["rol"], uid))
             if b.get("reiniciar_2fa"):
                 # Móvil perdido o cambiado: la próxima vez que entre volverá a configurar el doble factor
@@ -1048,8 +1079,8 @@ class Manejador(BaseHTTPRequestHandler):
             r = con.execute("SELECT * FROM casos WHERE numero=?", (num,)).fetchone()
             if not r:
                 raise Error(404, "Caso no encontrado")
-            if r["estado"] == "validado" and u["rol"] != "dm":
-                raise Error(403, "Caso validado: solo un data manager puede modificarlo")
+            if r["estado"] == "validado" and u["rol"] not in REVISAN:
+                raise Error(403, "Caso validado: solo un data manager o un cardiólogo revisor puede modificarlo")
             valores = json.loads(r["valores"])
             ia = json.loads(r["ia"] or "{}")
             principal, sec, estado = r["principal"], json.loads(r["secundarias"]), r["estado"]
@@ -1091,8 +1122,8 @@ class Manejador(BaseHTTPRequestHandler):
                     revisados.append(k)
             cambios += [("(IA revisado)", None, k) for k in revisados]
             if b.get("estado") in ("borrador", "completo", "validado") and b["estado"] != estado:
-                if (b["estado"] == "validado" or estado == "validado") and u["rol"] != "dm":
-                    raise Error(403, "Solo un data manager puede validar")
+                if (b["estado"] == "validado" or estado == "validado") and u["rol"] not in REVISAN:
+                    raise Error(403, "Solo un data manager o un cardiólogo revisor puede validar")
                 if b["estado"] == "validado" and "DUDA" in valores.values():
                     raise Error(409, "No se puede validar: el caso tiene dudas sin resolver")
                 if b["estado"] == "validado" and ia_pendientes(ia, valores):
@@ -1129,7 +1160,7 @@ class Manejador(BaseHTTPRequestHandler):
         self._json({"pistas": {f["codigo"]: f["texto"] for f in filas}, "detalle": filas})
 
     def api_put_pistas(self, p, q):
-        u = self._usuario(rol="dm")
+        u = self._usuario(rol=REVISAN)
         codigo = p[0] if p else ""
         if not re.fullmatch(r"[a-z0-9_]{1,80}", codigo):
             raise Error(400, "Variable no válida")

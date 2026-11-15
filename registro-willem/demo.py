@@ -10,6 +10,7 @@ import sqlite3
 USUARIOS = [
     ("admin", "Data manager (demo)", "dm", "willem2026"),
     ("lucia", "Lucía Martínez (demo)", "dm", "willem2026"),
+    ("revisor", "Cardiólogo revisor (demo)", "rev", "willem2026"),
     ("carmen", "Carmen Ruiz (demo)", "intro", "willem2026"),
     ("ana", "Ana López (demo)", "intro", "willem2026"),
 ]

@@ -91,6 +91,10 @@ const pillEnf = (g, sec = false) => {
 };
 const estadoPill = (e) => `<span class="estado ${e}">${{ borrador: "Borrador", completo: "Completo", validado: "Validado" }[e] || e}</span>`;
 const esDM = () => S.yo?.rol === "dm";
+// Cardiólogo revisor: revisa, corrige y valida casos, y ve la auditoría de la IA. No importa, exporta ni gestiona usuarios.
+const puedeRevisar = () => ["dm", "rev"].includes(S.yo?.rol);
+const NOMBRE_ROL = { dm: "Data manager", rev: "Cardiólogo revisor", intro: "Introducción de datos" };
+const COLOR_ROL = { dm: "#7c3aed", rev: "#0369a1", intro: "#0f766e" };
 
 // ===========================================================================
 //  Arranque y enrutado
@@ -128,7 +132,7 @@ async function entrar() {
   const dic = await api("GET", "diccionario");
   S.dic = dic;
   S.modelo = construirModelo(dic);
-  if (localStorage.getItem("willem_codigos") === null) localStorage.setItem("willem_codigos", esDM() ? "1" : "0");
+  if (localStorage.getItem("willem_codigos") === null) localStorage.setItem("willem_codigos", puedeRevisar() ? "1" : "0");
   document.body.classList.toggle("sin-codigos", localStorage.getItem("willem_codigos") !== "1");
   pintarEstructura();
   window.onhashchange = enrutar;
@@ -157,7 +161,7 @@ async function enrutar() {
     else if (pag === "dudas") await pDudas();
     else if (pag === "envio" && esDM() && !S.info?.nas) await pEnvio();
     else if (pag === "ia" && esDM()) await pIA();
-    else if (pag === "auditoria" && esDM()) await pAuditoria();
+    else if (pag === "auditoria" && puedeRevisar()) await pAuditoria();
     else if (pag === "carpeta" && navegador()) await pCarpeta();
     else if (pag === "unir" && navegador() && esDM()) await pUnir();
     else location.hash = "#/panel";
@@ -272,7 +276,7 @@ function pintarLogin() {
       <label>Contraseña<input class="inp" type="password" name="clave" autocomplete="current-password" required></label>
       <div class="error" id="errLogin"></div>
       <button class="btn primario grande" style="justify-content:center">Entrar ${icono("flechaD")}</button>
-      ${S.info?.demo ? `<div class="pista-demo"><b>Modo demostración</b> (pacientes inventados).<br>Data manager: <code>admin</code> · Introductora: <code>carmen</code> · Contraseña: <code>willem2026</code></div>` : ""}
+      ${S.info?.demo ? `<div class="pista-demo"><b>Modo demostración</b> (pacientes inventados).<br>Data manager: <code>admin</code> · Cardiólogo revisor: <code>revisor</code> · Introductora: <code>carmen</code> · Contraseña: <code>willem2026</code></div>` : ""}
     </form></div></div>`;
   $("#fLogin").onsubmit = async (ev) => {
     ev.preventDefault();
@@ -414,6 +418,8 @@ function pintarEstructura() {
         ${S.info?.nas ? "" : `<a href="#/envio" data-pag="envio">${icono("enviar")} Envío al registro</a>`}
         <a href="#/exportar" data-pag="exportar">${icono("exportar")} Exportar</a>
         ${navegador() ? "" : `<a href="#/usuarios" data-pag="usuarios">${icono("usuarios")} Usuarios</a>`}` : ""}
+        ${S.yo?.rol === "rev" ? `<div class="titulo">Revisión</div>
+        <a href="#/auditoria" data-pag="auditoria">${icono("lupa")} Auditoría de la IA</a>` : ""}
         ${navegador() ? `<div class="titulo">Guardado</div><a href="#/carpeta" data-pag="carpeta">${icono("nube")} Carpeta compartida</a>` : ""}
       </nav>
       <div class="pie-lateral">
@@ -421,7 +427,7 @@ function pintarEstructura() {
         ${navegador() ? `<button class="estado-carpeta" id="estCarpeta"></button>` : `<div class="local-ok">${icono("candado")} Funcionando en local · sin internet</div>`}
         <div class="tarjeta-usuario">
           <div class="avatar" style="background:${colorDe(S.yo.usuario)}">${esc(iniciales(S.yo.nombre))}</div>
-          <div style="min-width:0"><div class="n">${esc(S.yo.nombre)}</div><div class="r">${dm ? "Data manager" : "Introducción de datos"}</div></div>
+          <div style="min-width:0"><div class="n">${esc(S.yo.nombre)}</div><div class="r">${NOMBRE_ROL[S.yo.rol] || "Introducción de datos"}</div></div>
           <button id="btnSalir" title="${navegador() ? "Cambiar de usuario" : "Cerrar sesión"}">${icono("salir")}</button>
         </div>
       </div>
@@ -519,7 +525,7 @@ async function pPanel() {
       </div>
     </div>
     <div class="grid g4" style="margin-bottom:18px">
-      ${[["casos", tot, "Casos registrados"], ["check", comp, "Completos o validados"], ["escudo", val, "Validados por data manager"], ["rayo", media + "%", "Completitud media"]]
+      ${[["casos", tot, "Casos registrados"], ["check", comp, "Completos o validados"], ["escudo", val, "Validados"], ["rayo", media + "%", "Completitud media"]]
         .map(([i, v, e]) => `<div class="tarjeta kpi"><div class="ic">${icono(i)}</div><div><div class="v">${v}</div><div class="e">${e}</div></div></div>`).join("")}
     </div>
     <div class="bloque-tit" style="margin-top:6px">Por diagnóstico del estudio</div>
@@ -647,7 +653,7 @@ async function pNuevo(qs) {
 // ===========================================================================
 //  EDITOR DE CASO
 // ===========================================================================
-const soloLectura = () => E.caso?.estado === "validado" && !esDM();
+const soloLectura = () => E.caso?.estado === "validado" && !puedeRevisar();
 
 async function pCaso(num, tabId) {
   if (!S.casos.length) await cargarCasos();
@@ -700,12 +706,12 @@ function pintarCaso(animar = false) {
         <select id="selEstado" ${soloLectura() ? "disabled" : ""}>
           <option value="borrador" ${c.estado === "borrador" ? "selected" : ""}>Borrador</option>
           <option value="completo" ${c.estado === "completo" ? "selected" : ""}>Completo</option>
-          ${esDM() || c.estado === "validado" ? `<option value="validado" ${c.estado === "validado" ? "selected" : ""}>Validado</option>` : ""}
+          ${puedeRevisar() || c.estado === "validado" ? `<option value="validado" ${c.estado === "validado" ? "selected" : ""}>Validado</option>` : ""}
         </select>
         ${anillo(prog.pct, 64, 6, "#fff")}
       </div>
     </div>
-    ${soloLectura() ? `<div class="banda-lectura">${icono("candado")} Caso validado por un data manager: solo lectura.</div>` : ""}
+    ${soloLectura() ? `<div class="banda-lectura">${icono("candado")} Caso validado: solo lectura.</div>` : ""}
     ${c.ia?._diagnosticos && !c.ia._diagnosticos.revisado ? `<div class="banda-ia">${icono("chispa")}<div><b>La IA propone ${c.ia._diagnosticos.valor_texto.includes(",") ? "estos diagnósticos" : "este diagnóstico"}: ${esc(diags.map((g) => ENFERMEDADES[g]?.nombre || g).join(" · "))}</b>
       ${c.ia._diagnosticos.aviso ? `<div class="aviso-ia">${icono("aviso")} ${esc(c.ia._diagnosticos.aviso)}</div>` : ""}
       <div class="sub">Compruébelo antes de seguir: de los diagnósticos depende qué preguntas se muestran y las filas del Excel.</div></div>
@@ -1000,7 +1006,7 @@ function campoHTML(it, v, animar) {
   let ctrl = "", ancho = false, aviso = "";
   const botonesMarca = () => `<div class="marcas-bt">
       <button class="mb ${mk === NC ? "on nc" : ""}" data-marca="${NC}" data-mk="${esc(it.codigo)}" title="Desconocido: lo he buscado y no consta">${icono("interrogacion")}<span>Desconocido</span></button>
-      <button class="mb ${mk === DUDA ? "on duda" : ""}" data-marca="${DUDA}" data-mk="${esc(it.codigo)}" title="Duda: que lo revise un data manager">${icono("bandera")}<span>Duda</span></button></div>`;
+      <button class="mb ${mk === DUDA ? "on duda" : ""}" data-marca="${DUDA}" data-mk="${esc(it.codigo)}" title="Duda: que lo revise un cardiólogo revisor o un data manager">${icono("bandera")}<span>Duda</span></button></div>`;
   const notaDuda = () => mk === DUDA ? `<div class="nota-duda">${icono("bandera")}<input class="inp" data-in="${esc(it.codigo)}_duda_nota" data-t="texto" data-foco="${esc(it.codigo)}_duda_nota"
       placeholder="¿Cuál es la duda? Ej.: «IMC 29,8: ¿cuenta como obesidad?»" value="${esc(v[it.codigo + "_duda_nota"] || "")}"></div>` : "";
 
@@ -1539,7 +1545,7 @@ const ESTADO_AUD = { confirmado: ["Confirmado", "#16a34a"], corregido: ["Corregi
   pendiente: ["Sin revisar", "#64748b"], revisado: ["Revisado", "#16a34a"] };
 
 async function pAuditoria() {
-  barra("Auditoría de la IA", "Data manager", `<button class="btn" id="audX">${icono("exportar")} Excel</button>`);
+  barra("Auditoría de la IA", NOMBRE_ROL[S.yo.rol] || "", `<button class="btn" id="audX">${icono("exportar")} Excel</button>`);
   await cargarCasos();
   let pistas = {};
   try { pistas = (await api("GET", "pistas")).pistas || {}; } catch { /* registro sin pistas */ }
@@ -1728,7 +1734,7 @@ async function pUsuarios() {
   const us = await api("GET", "usuarios");
   $("#contenido").innerHTML = `<div class="tarjeta"><table class="tabla"><thead><tr><th>Persona</th><th>Usuario</th><th>Rol</th><th>Estado</th>${navegador() ? "" : "<th>Doble factor</th>"}<th>Alta</th><th></th></tr></thead><tbody>
     ${us.map((u) => `<tr style="cursor:default"><td><div style="display:flex;gap:10px;align-items:center"><span class="avatar" style="background:${colorDe(u.usuario)}">${esc(iniciales(u.nombre))}</span><b>${esc(u.nombre)}</b></div></td>
-      <td class="codigo">${esc(u.usuario)}</td><td>${u.rol === "dm" ? `<span class="pill" style="--c:#7c3aed">Data manager</span>` : `<span class="pill" style="--c:#0f766e">Introducción de datos</span>`}</td>
+      <td class="codigo">${esc(u.usuario)}</td><td><span class="pill" style="--c:${COLOR_ROL[u.rol] || "#0f766e"}">${NOMBRE_ROL[u.rol] || esc(u.rol)}</span></td>
       <td>${u.activo ? `<span class="estado validado">Activo</span>` : `<span class="estado borrador">Desactivado</span>`}${u.bloqueado_hasta ? ` <span class="pill sec" style="--c:#dc2626">${icono("candado")} Bloqueado</span>` : ""}</td>
       ${navegador() ? "" : `<td>${u.doble_factor ? `<span class="pill sec" style="--c:#16a34a">${icono("escudo")} Activado</span>` : `<span class="sub">${S.info?.doble_factor ? "Se configurará al entrar" : "No"}</span>`}</td>`}
       <td class="quien">${esc(fmtFecha(u.creado))}</td>
@@ -1740,12 +1746,17 @@ async function pUsuarios() {
   $("#bNU").onclick = () => modal({
     titulo: "Nuevo usuario", aceptar: "Crear",
     html: `<form class="form" onsubmit="return false"><label>Nombre y apellidos<input class="inp" id="un"></label><div class="fila"><label>Usuario<input class="inp" id="uu"></label>
-      <label>Rol<select class="inp" id="ur"><option value="intro">Introducción de datos</option><option value="dm">Data manager</option></select></label></div>
+      <label>Rol<select class="inp" id="ur"><option value="intro">Introducción de datos</option><option value="rev">Cardiólogo revisor</option><option value="dm">Data manager</option></select></label></div>
       <label>Contraseña inicial (mín. 8)<input class="inp" id="up" type="password"></label><div class="error"></div></form>`,
     alAceptar: async (m) => { await api("POST", "usuarios", { nombre: $("#un", m).value, usuario: $("#uu", m).value, rol: $("#ur", m).value, clave: $("#up", m).value }); toast("Usuario creado"); recargar(); },
   });
   $$("[data-act]").forEach((b) => (b.onclick = async () => { try { await api("PUT", "usuarios/" + b.dataset.act, { activo: b.dataset.a !== "1" }); recargar(); } catch (e) { toast(e.message, "mal"); } }));
-  $$("[data-rol]").forEach((b) => (b.onclick = async () => { try { await api("PUT", "usuarios/" + b.dataset.rol, { rol: b.dataset.r === "dm" ? "intro" : "dm" }); recargar(); } catch (e) { toast(e.message, "mal"); } }));
+  $$("[data-rol]").forEach((b) => (b.onclick = () => modal({
+    titulo: "Cambiar el perfil", aceptar: "Guardar",
+    html: `<form class="form" onsubmit="return false"><label>Perfil<select class="inp" id="cr">${["intro", "rev", "dm"].map((r) => `<option value="${r}" ${r === b.dataset.r ? "selected" : ""}>${NOMBRE_ROL[r]}</option>`).join("")}</select></label>
+      <div class="sub"><b>Introducción de datos:</b> crea y rellena casos.<br><b>Cardiólogo revisor:</b> además revisa, corrige y valida casos, y ve la auditoría de la IA.<br><b>Data manager:</b> además importa de la IA, exporta, borra casos y gestiona usuarios.</div><div class="error"></div></form>`,
+    alAceptar: async (m) => { await api("PUT", "usuarios/" + b.dataset.rol, { rol: $("#cr", m).value }); toast("Perfil cambiado"); recargar(); },
+  })));
   $$("[data-2fa]").forEach((b) => (b.onclick = async () => {
     if (!(await modal({ titulo: "Reiniciar el doble factor", aceptar: "Reiniciar", peligro: true,
       html: `<p><b>${esc(b.dataset.n)}</b> tendrá que volver a configurar la aplicación de códigos la próxima vez que entre (por ejemplo, porque ha cambiado de móvil).</p><p class="sub">Se cerrarán sus sesiones abiertas.</p>` }))) return;
