@@ -270,6 +270,14 @@ validados nunca cambian. Después se vuelve al paso 1 para ver si el acierto ha 
 Por línea de comandos: `extraer_ia.py --variables resting_heart_rate,echocardiography_lvef` y
 `--pistas archivo.json`.
 
+## Pasar de un paciente a otro
+
+Dentro de un caso, arriba y abajo, hay una tira con **Paciente anterior** · posición («3 de 27») ·
+**Siguiente paciente**. Recorre la lista de «Casos» tal como se vio por última vez, con sus filtros:
+por ejemplo, solo los que tienen datos de la IA por revisar. Se guarda lo pendiente antes de cambiar
+y se mantiene la pestaña. Quien puede validar tiene además **Validar y siguiente**, y en el Panel el
+acceso directo **Revisar lo de la IA**. Funciona igual en modo normal y en Modo Vintage.
+
 ## Perfiles de usuario (modo servidor y NAS)
 
 | Perfil | Qué puede hacer |

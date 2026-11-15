@@ -390,6 +390,22 @@ textarea.inp { width: 100%; height: auto; min-height: 76px; padding: 10px 12px; 
 .fijo .ico { width: 16px; height: 16px; color: var(--ink-3); }
 
 .nav-sec { display: flex; justify-content: space-between; margin-top: 26px; gap: 10px; }
+/* Paciente anterior / siguiente */
+.tira-pac { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.tira-pac.abajo { margin: 22px 0 0; padding-top: 16px; border-top: 1px dashed var(--line); }
+.tira-pac .pos { margin: 0 auto; text-align: center; color: var(--ink-2); font-size: 14px; line-height: 1.25; }
+.tira-pac .pos b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.tira-pac .pos small { display: block; font-size: 12px; color: var(--ink-3); }
+.tira-pac .btn[disabled] { opacity: .4; cursor: default; }
+.vintage .tira-pac { margin-bottom: 8px; gap: 8px; }
+.vintage .tira-pac .btn { height: 30px; padding: 0 10px; font-size: 12.5px; }
+.vintage .tira-pac .pos { font-size: 12.5px; display: flex; gap: 6px; align-items: baseline; }
+.vintage .tira-pac .pos small { display: inline; }
+@media (max-width: 640px) {
+  .tira-pac .btn { flex: 1 1 46%; justify-content: center; }
+  .tira-pac .pos { order: -1; flex: 1 1 100%; }
+  .tira-pac [data-validar-sig] { flex: 1 1 100%; order: 3; }
+}
 .solo-lectura .campo { pointer-events: none; opacity: .85; }
 .banda-lectura { display: flex; gap: 10px; align-items: center; padding: 12px 16px; border-radius: 12px; background: var(--ok-soft); color: var(--ok); font-weight: 600; margin-bottom: 14px; }
 

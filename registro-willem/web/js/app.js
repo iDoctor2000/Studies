@@ -534,6 +534,7 @@ async function pPanel() {
       <div class="acciones">
         <a class="btn blanco" href="#/nuevo">${icono("mas")} Nuevo caso</a>
         <a class="btn" href="#/casos?estado=borrador">${icono("editar")} Continuar borradores</a>
+        ${puedeRevisar() && S.casos.some((c) => c.iaPend) ? `<a class="btn" href="#/casos?ia=1">${icono("chispa")} Revisar lo de la IA (${S.casos.filter((c) => c.iaPend).length})</a>` : ""}
         ${esDM() ? `<a class="btn" href="#/exportar">${icono("exportar")} Exportar al registro</a>` : ""}
       </div>
     </div>
@@ -573,6 +574,8 @@ async function pCasos(qs) {
   const pintar = () => {
     const lista = S.casos.filter((c) => (!F.nota || tieneNota(c)) && (!F.ia || c.iaPend) && (!F.enf || diagnosticosDe(c).includes(F.enf)) && (!F.estado || c.estado === F.estado) && (!F.q || pad(c.numero).includes(F.q.replace(/\D/g, "")) && F.q.replace(/\D/g, "")));
     const cuenta = (g) => S.casos.filter((c) => diagnosticosDe(c).includes(g)).length;
+    guardarCola(lista.map((c) => c.numero), [F.enf && ENFERMEDADES[F.enf]?.corto, F.estado && { borrador: "en borrador", completo: "completos", validado: "validados" }[F.estado],
+      F.nota && "marcados para revisar", F.ia && "con datos de la IA por revisar"].filter(Boolean).join(" · "));
     cont.innerHTML = `
       <div class="filtros">
         <div class="buscador">${icono("buscar")}<input id="q" placeholder="Buscar por número de caso…" value="${esc(F.q)}" inputmode="numeric"></div>
@@ -674,6 +677,7 @@ async function pCaso(num, tabId) {
   E.pend = {}; E.origen = null;
   const tabs = pestanasDelCaso(S.modelo, E.caso);
   E.tab = tabs.find((t) => t.id === tabId) ? tabId : tabs[0].id; // siempre empieza por la primera pestaña ("Diagnósticos")
+  E.cola = colaDe(num);
   barra(`Caso #${pad(num)}`, `<a href="#/casos">Casos</a> › ${esc(diagnosticosDe(E.caso).map((g) => ENFERMEDADES[g]?.corto || g).join(" · "))}`,
     `<button class="btn ${vintageActivo() ? "on-vintage" : ""}" id="bVista" title="Vista compacta de escritorio: más variables por pantalla y manejo con teclado">${icono("vintage")} ${vintageActivo() ? "Modo normal" : "Modo Vintage"}</button>${E.caso.informes?.length ? `<button class="btn" id="bInforme">${icono("libro")} Informe${E.caso.informes.length > 1 ? `s (${E.caso.informes.length})` : ""}</button>` : ""}<button class="btn" id="bImp">${icono("importar")} Importar informe</button><button class="btn fantasma" id="bHist">${icono("historial")} Historial</button>`);
   $("#bInforme")?.addEventListener("click", () => abrirInforme());
@@ -703,6 +707,7 @@ function pintarCaso(animar = false) {
 
   cont.style.setProperty("--c", e.color);
   cont.innerHTML = `
+    ${tiraPacientes(c)}
     <div class="cabecera-caso" style="--c:${e.color}">
       <div class="ic-grande">${icono(c.principal)}</div>
       <div><div class="t1">Diagnóstico${diags.length > 1 ? "s" : ""} del estudio · caso <span class="num-caso">#${pad(c.numero)}</span></div>
@@ -760,7 +765,14 @@ function pintarCaso(animar = false) {
             : `<button class="btn color grande" id="bFin">${icono("check")} Terminar</button>`}
         </div>
       </div>
-    </div>`;
+    </div>
+    ${tiraPacientes(c, true)}`;
+  $$("[data-ir]", cont).forEach((b) => (b.onclick = () => irAPaciente(+b.dataset.ir, b.dataset.tab === "1")));
+  $$("[data-validar-sig]", cont).forEach((b) => (b.onclick = async () => {
+    if (!(await cambiarEstado("validado", "Validado"))) return;
+    if (E.cola.sig) irAPaciente(E.cola.sig, false);
+    else { toast("Era el último paciente de la lista"); location.hash = "#/casos"; }
+  }));
 
   // Navegación entre pestañas sin recargar el caso
   $$(".indice a, .nav-sec a", cont).forEach((a) => a.addEventListener("click", (ev) => {
@@ -797,19 +809,7 @@ function pintarCaso(animar = false) {
     if (ok) revisarIA(ks, `${ks.length} datos de la IA confirmados`);
   });
   $("#bEnviar")?.addEventListener("click", () => enviarAlRegistro(E.caso));
-  $("#selEstado").onchange = async (ev) => {
-    await vaciarPendientes();
-    if (ev.target.value === "validado" && tieneNota(c) && !(await modal({ titulo: "Caso marcado para revisión", aceptar: "Validar igualmente",
-      html: `<p>Este paciente tiene una nota de revisión (★):</p><blockquote class="cita-nota">${esc(c.valores.nota_revision)}</blockquote><p class="sub">Si ya está revisado, puede borrar la nota desde la estrella.</p>` }))) return pintarCaso();
-    if (ev.target.value === "validado" && dudasDelCaso(S.modelo, c).length) {
-      toast("No se puede validar: hay dudas sin resolver en este caso", "mal"); return pintarCaso();
-    }
-    if (ev.target.value === "validado" && iaPendientes(c).length) {
-      toast(`No se puede validar: quedan ${iaPendientes(c).length} datos de la IA sin revisar`, "mal"); return pintarCaso();
-    }
-    try { E.caso = conInformes(await api("PUT", "casos/" + c.numero, { estado: ev.target.value })); toast("Estado: " + ev.target.selectedOptions[0].text); pintarCaso(); }
-    catch (er) { toast(er.message, "mal"); pintarCaso(); }
-  };
+  $("#selEstado").onchange = async (ev) => { await cambiarEstado(ev.target.value, ev.target.selectedOptions[0].text); };
   $("#bFin")?.addEventListener("click", async () => {
     await vaciarPendientes();
     if (prog.pct < 100) toast(`Faltan ${prog.tot - prog.ok} campos por responder`, "info");
@@ -843,6 +843,52 @@ function pintarCaso(animar = false) {
   if (V) sec.addEventListener("keydown", teclaVintage);
   sec.addEventListener("input", (ev) => { if (ev.target.classList?.contains("fecha")) mascaraFecha(ev.target, ev); });
   actualizarGuardado();
+}
+
+// ---------------------------------------------------------------------------
+//  PACIENTE ANTERIOR / SIGUIENTE
+//  Se recorre la lista de «Casos» tal como se vio por última vez (con sus filtros): así, quien revisa
+//  filtra «con datos de la IA por revisar» y va pasando de un paciente a otro sin volver a la lista.
+// ---------------------------------------------------------------------------
+function guardarCola(numeros, titulo) {
+  S.cola = { numeros, titulo };
+  try { sessionStorage.setItem("willem_cola", JSON.stringify(S.cola)); } catch { /* sin almacenamiento: solo en memoria */ }
+}
+function colaDe(num) {
+  if (!S.cola) { try { S.cola = JSON.parse(sessionStorage.getItem("willem_cola") || "null"); } catch { S.cola = null; } }
+  const existen = new Set(S.casos.map((c) => c.numero));
+  let numeros = (S.cola?.numeros || []).filter((n) => existen.has(n)), titulo = S.cola?.titulo || "";
+  if (!numeros.includes(num)) { numeros = S.casos.map((c) => c.numero); titulo = ""; } // el caso no está en la lista filtrada: se recorren todos
+  const i = numeros.indexOf(num);
+  return { i, total: numeros.length, ant: i > 0 ? numeros[i - 1] : null, sig: i >= 0 && i < numeros.length - 1 ? numeros[i + 1] : null, titulo };
+}
+function tiraPacientes(c, abajo = false) {
+  const q = E.cola;
+  if (!q || q.i < 0 || q.total < 2) return "";
+  const validar = puedeRevisar() && c.estado !== "validado";
+  return `<div class="tira-pac ${abajo ? "abajo" : ""}">
+    <button class="btn" data-ir="${q.ant ?? ""}" data-tab="1" ${q.ant ? "" : "disabled"} title="${q.ant ? "Caso #" + pad(q.ant) : "Es el primero de la lista"}">${icono("flechaI")} Paciente anterior</button>
+    <span class="pos"><b>${q.i + 1}</b> de <b>${q.total}</b>${q.titulo ? `<small>${esc(q.titulo)}</small>` : `<small>todos los casos</small>`}</span>
+    ${validar ? `<button class="btn primario" data-validar-sig title="Da el caso por validado y abre el siguiente de la lista">${icono("check")} Validar y siguiente</button>` : ""}
+    <button class="btn" data-ir="${q.sig ?? ""}" data-tab="1" ${q.sig ? "" : "disabled"} title="${q.sig ? "Caso #" + pad(q.sig) : "Es el último de la lista"}">Siguiente paciente ${icono("flechaD")}</button>
+  </div>`;
+}
+/** Abre otro paciente guardando antes lo pendiente. Con mismaPestana, se queda en la pestaña en la que se estaba. */
+async function irAPaciente(num, mismaPestana) {
+  if (!num) return;
+  await vaciarPendientes();
+  location.hash = `#/caso/${num}` + (mismaPestana && E.tab ? "/" + encodeURIComponent(E.tab) : "");
+}
+/** Cambia el estado del caso abierto con todas las comprobaciones. Devuelve true si se cambió. */
+async function cambiarEstado(valor, texto) {
+  const c = E.caso;
+  await vaciarPendientes();
+  if (valor === "validado" && tieneNota(c) && !(await modal({ titulo: "Caso marcado para revisión", aceptar: "Validar igualmente",
+    html: `<p>Este paciente tiene una nota de revisión (★):</p><blockquote class="cita-nota">${esc(c.valores.nota_revision)}</blockquote><p class="sub">Si ya está revisado, puede borrar la nota desde la estrella.</p>` }))) { pintarCaso(); return false; }
+  if (valor === "validado" && dudasDelCaso(S.modelo, c).length) { toast("No se puede validar: hay dudas sin resolver en este caso", "mal"); pintarCaso(); return false; }
+  if (valor === "validado" && iaPendientes(c).length) { toast(`No se puede validar: quedan ${iaPendientes(c).length} datos de la IA sin revisar`, "mal"); pintarCaso(); return false; }
+  try { E.caso = conInformes(await api("PUT", "casos/" + c.numero, { estado: valor })); toast("Estado: " + texto); pintarCaso(); return true; }
+  catch (er) { toast(er.message, "mal"); pintarCaso(); return false; }
 }
 
 // ---------------------------------------------------------------------------

@@ -65,8 +65,12 @@ código del móvil.
 Todo lo anterior y, además:
 
 - **Dudas**: lista de las preguntas marcadas con bandera por el personal, para resolverlas.
-- Revisar los casos **completos**, corregir lo necesario y pasarlos a **Validado**. No se puede
-  validar un caso con dudas sin resolver o con datos de la IA sin revisar.
+- **Revisar lo de la IA** (botón del Panel): abre la lista de casos con datos de la IA por revisar.
+  Entre en el primero y vaya pasando con **Siguiente paciente** y **Paciente anterior** (arriba y
+  abajo de cada caso); se mantiene la pestaña en la que esté. Las flechas recorren la lista tal como
+  la dejó filtrada en «Casos».
+- **Validar y siguiente**: da el caso por validado y abre el siguiente. No se puede validar un caso
+  con dudas sin resolver o con datos de la IA sin revisar.
 - Un caso validado se puede corregir o devolver a «Completo».
 - **Auditoría de la IA**: acierto de la IA en cada variable. Al pulsar una variable se ven los casos
   y se puede escribir una **pista clínica** (el criterio que debe seguir la IA).
