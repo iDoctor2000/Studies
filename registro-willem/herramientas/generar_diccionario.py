@@ -423,13 +423,14 @@ COL_GRUPO = {"HF": "IC", "ATTR": "ATTR", "AS": "EAO", "HCM": "MCH", "MI": "IAM",
 PESTANAS = [
     # 4ª ronda de Sergio: primero Diagnósticos, después Datos del paciente
     ("1. Diagnósticos", ["03. Diagnóstico y clasificación", "04. ATTR: marcadores", "05. MI: gravedad y tratamiento"]),
-    ("2. Datos del paciente", ["01. Metadatos", "02. Demografía y hábitos", "15. Constantes", "15. Clase funcional NYHA", "02. Hábitos"]),
-    ("3. Antecedentes y comorbilidades", ["16. Factores de riesgo cardiovascular", "17. Historia cardiovascular", "19. Comorbilidades"]),
-    ("4. Procedimientos diagnósticos y dispositivos", ["14. Analítica y ECG", "06. Conducción y ECG", "08. Ecocardiograma general",
+    # 5ª ronda de Sergio: «Datos del paciente» y «Antecedentes y comorbilidades» en una sola pestaña
+    ("2. Datos del paciente y antecedentes", ["01. Metadatos", "02. Demografía y hábitos", "15. Constantes", "15. Clase funcional NYHA", "02. Hábitos",
+                                              "16. Factores de riesgo cardiovascular", "17. Historia cardiovascular", "19. Comorbilidades"]),
+    ("3. Procedimientos diagnósticos y dispositivos", ["14. Analítica y ECG", "06. Conducción y ECG", "08. Ecocardiograma general",
                                                        "09. Eco estenosis aórtica", "11. Coronariografía / MI", "05. MI: revascularización",
                                                        "05. Complicaciones pre o intrahospitalarias",
                                                        "10. ATTR: gammagrafía", "12. ATTR: biopsia", "13. Genética", "18. Dispositivos"]),
-    ("5. Seguimiento", ["20. Seguimiento"]),
+    ("4. Seguimiento", ["20. Seguimiento"]),
 ]
 NOMBRE_BLOQUE = {"Demografía y hábitos": "Demografía", "Constantes": "Constantes", "Coronariografía / MI": "Coronariografía", "MI: revascularización": "Revascularización coronaria",
                  "ATTR: gammagrafía": "Gammagrafía", "ATTR: biopsia": "Biopsia", "Genética": "Estudio genético",
@@ -550,6 +551,34 @@ REGLAS2 = {
                      "myocardial_infarction = 1 y timi_coronary_grade_flow_3 = 1 -> 1"},
 }
 
+# 5ª ronda de Sergio (nov-2026). Se aplican después de REGLAS2.
+#  "calcular: funcion: NOMBRE" = cálculo programado (web/js/registro.js y servidor.py), no una regla sencilla.
+HCV, COMORB = "17. Historia cardiovascular", "19. Comorbilidades"
+REGLAS3 = {
+    # Metadatos: no se muestran el centro, el número de caso ni los criterios de elegibilidad (sí van al Excel)
+    5: {"oculto": "Sí"}, 6: {"oculto": "Sí"},
+    10: {"oculto": "Sí"}, 11: {"oculto": "Sí"}, 12: {"oculto": "Sí"}, 13: {"oculto": "Sí"}, 14: {"oculto": "Sí"},
+    # Síncope de causa no aclarada: solo si hubo síncope; si no lo hubo, es No
+    170: {"mostrar_solo_si": "history_syncope = 1", "valor_por_defecto": "history_syncope = 0 -> 0"},
+    # TV polimórfica y FV: una sola pregunta (la de «Arritmias previas»); la otra columna del registro se copia
+    177: {"oculto": "Sí", "copiar_de": "prior_polymorphic_ventricular_tachycardia", "ayuda_ES": "Se copia de la pregunta de arritmias previas."},
+    178: {"oculto": "Sí", "copiar_de": "prior_ventricular_fibrillation", "ayuda_ES": "Se copia de la pregunta de arritmias previas."},
+    # Enfermedad coronaria y valvulopatía pasan a Historia cardiovascular; ictus y esperanza de vida, a Comorbilidades
+    203: {"pestaña": HCV}, 205: {"pestaña": HCV},
+    182: {"pestaña": COMORB},
+    171: {"pestaña": COMORB, "ayuda_ES": "Estimación a partir de los datos de la historia clínica."},
+    # Síndrome cardiorrenal: se calcula y no se muestra
+    215: {"oculto": "Sí", "calcular": "funcion: sindrome_cardiorrenal",
+          "ayuda_ES": "Se calcula: Sí si hay insuficiencia cardiaca (diagnóstico del estudio o ingreso previo por IC) y enfermedad renal crónica "
+                      "o filtrado MDRD < 60; No si falta alguna de las dos; Duda si no se sabe."},
+    # Filtrado glomerular: se calcula con la creatinina, la edad y el sexo
+    147: {"calcular": "funcion: mdrd",
+          "ayuda_ES": "Se calcula solo: 175 × creatinina^-1,154 × edad^-0,203 (× 0,742 si es mujer). La edad, en la fecha de la analítica."},
+    227: {"ayuda_ES": "Última fecha en la que estamos seguros de que el paciente está vivo. Ningún evento puede ser posterior."},
+}
+# Orden de «Historia cardiovascular» (filas del CRF). El flutter no estaba en la lista de Sergio: se deja tras el tipo de FA.
+ORDEN_HCV = [203, 181, 184, 185, 205, 169, 170, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 183, 175, 172, 174, 196, 176, 179, 173, 177, 178]
+
 # Preguntas llave nuevas (variables propias, no se envían). fila -> (código, texto, ¿con fecha?)
 # Si la fila original es una fecha del registro, se oculta y se copia de la fecha de la llave.
 PUERTAS = {
@@ -608,6 +637,7 @@ def aplicar_propuesta(salida, ruta):
             d["patologias"] = (d["patologias"] + " ISQ").strip()
         d.update(REGLAS.get(fila, {}))
         d.update(REGLAS2.get(fila, {}))
+        d.update(REGLAS3.get(fila, {}))
         d["_fila"] = fila
         if fila in PUERTAS:
             cod, texto, con_fecha = PUERTAS[fila]
@@ -691,6 +721,19 @@ def aplicar_propuesta(salida, ruta):
     for fila, tras in ((36, 159), (37, 36), (38, 37), (39, 38)):
         mover_tras(fila, tras)
 
+    # 5ª ronda: orden de «Historia cardiovascular»; ictus tras la arterial periférica; esperanza de vida al final
+    def fila_de(n):
+        return next(x for x in out if x.get("_fila") == n)
+    bloque = [fila_de(n) for n in ORDEN_HCV]
+    pos = min(out.index(x) for x in out if x["pestaña"] == HCV)
+    ancla = out[pos]
+    for x in bloque:
+        out.remove(x)
+    pos = out.index(ancla) if ancla in out else pos
+    out[pos:pos] = bloque
+    mover_tras(182, 204)
+    mover_tras(171, 225)
+
     # Rehospitalizaciones
     nueva("rehospitalization", "Rehospitalización", "boolean", 229)
     nueva("rehospitalization_hf", "Rehospitalización por IC", "boolean, date", 230, cond="rehospitalization = 1")
@@ -759,7 +802,7 @@ PISTAS = {
     "coronary_artery_disease": "1 si consta cardiopatía isquémica, infarto, angina, stents o cirugía de bypass.",
     "prior_heart_failure_hospitalization": "1 solo si consta un ingreso ANTERIOR a este por insuficiencia cardiaca.",
     "chronic_kidney_disease": "ERC, IRC, insuficiencia renal crónica o trasplante renal = 1.",
-    "heart_failure_diagnosis_date": "Fecha del primer diagnóstico de IC. Si este ingreso es el debut, la fecha de ingreso. Si la IC es anterior y no consta la fecha, null.",
+    "life_expectancy_lt_24_months": "Es una ESTIMACIÓN clínica. 1 si el informe describe una situación terminal o de muy mal pronóstico a corto plazo: cáncer metastásico o en tratamiento paliativo, seguimiento por cuidados paliativos, demencia avanzada, insuficiencia de órgano terminal sin opciones de tratamiento, o si se indica limitación del esfuerzo terapéutico. 0 en los demás casos. En «cita», la frase que lo justifica.",
     "weight": "Peso en kg tal y como consta; no lo calcules.",
     "height": "Talla en cm tal y como consta; si viene en metros (1,68), pásala a cm (168).",
 }
@@ -801,13 +844,14 @@ def write(dst, salida):
         ("valor_por_defecto: valor al crear el caso; o regla 'campo = 1 -> valor ; otro = 1 -> valor'.", False),
         ("copiar_de: el valor se calcula copiando otro campo (p. ej. enfermedad renal = ERC).", False),
         ("calcular: reglas 'CONDICIÓN -> VALOR ; …' (gana la primera que se cumple; 'y' une condiciones). '| fecha: CAMPO' rellena su _date.", False),
+        ("          'funcion: NOMBRE' = cálculo programado (mdrd, sindrome_cardiorrenal). Un campo calculado no oculto se ve, pero no se edita.", False),
         ("", False),
         ("GRUPOS DE PATOLOGÍA", True),
     ] + [(f"{k}: {v}", False) for k, v in GRUPOS.items()] + [
         ("", False),
         ("REGLAS ACORDADAS", True),
         ("• Sí = 1, No = 0. Si se marca Sí en un campo con fecha, se abre la fecha; si No, no.", False),
-        ("• Desconocido y Duda en todos los Sí/No y listas: en el Excel final van vacíos; Duda impide validar el caso.", False),
+        ("• Desconocido (se ve como -1; en fechas, 00/00/0000) y Duda (se ve como ?): en el Excel final van vacíos; Duda impide validar el caso.", False),
         ("• Agrupación por diagnóstico según la propuesta de Sergio (nov-2026).", False),
         ("• Campo que nadie toca = vacío ('no consta'). Solo se pone 0 al pulsar 'Marcar el resto como No'.", False),
         ("• Listas de selección única (raza, sexo, NYHA…): se elige una y se exporta 1 en esa y 0 en las demás.", False),

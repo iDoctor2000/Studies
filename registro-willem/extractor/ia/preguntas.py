@@ -19,7 +19,9 @@ NOMBRE_DIAG = {"ISQ": "Cardiopatía isquémica", "IC": "Insuficiencia cardiaca",
                "MCH": "Miocardiopatía hipertrófica", "QTL": "Síndrome de QT largo", "ATTR": "Amiloidosis cardiaca por transtiretina (ATTR)",
                "IAM": "Infarto agudo de miocardio", "HTA": "Cardiopatía hipertensiva", "OTRO": "Otra cardiopatía"}
 # Campos que no pregunta la IA: se rellenan solos o salen de la cabecera del informe
-NO_PREGUNTAR = {"authored_at", "patient_id", "site_id", "other_disease", "dob", "biological_sex"} | set(DIAG.values())
+# (sexo, nacimiento, raza, ámbito asistencial y fechas de diagnóstico: ver extraer_ia.Extraccion.caso)
+NO_PREGUNTAR = ({"authored_at", "patient_id", "site_id", "other_disease", "dob", "biological_sex", "race", "patient_care_setting"}
+                | set(DIAG.values()) | {v + "_diagnosis_date" for v in DIAG.values()})
 
 
 def _t(v):

@@ -17,6 +17,13 @@ const VERSION_ARCHIVO = 1;
 
 const ahora = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 19); };
 const err = (msg) => { const e = new Error(msg); throw e; };
+/** Fechas de eventos del seguimiento posteriores a la del último seguimiento (igual que servidor.py). */
+export function eventosPosteriores(valores) {
+  const fu = String(valores.follow_up_date || "");
+  if (!/^\d{4}-\d{2}-\d{2}/.test(fu)) return [];
+  return Object.keys(valores).filter((k) => ["death_date", "rehospitalization_hf_date", "rehospitalization_no_hf_date"].includes(k) || (k.startsWith("mace_") && k.endsWith("_date")))
+    .filter((k) => /^\d{4}-\d{2}-\d{2}/.test(String(valores[k])) && String(valores[k]).slice(0, 10) > fu.slice(0, 10)).sort();
+}
 const diagnosticos = (p, sec) => Object.fromEntries(Object.entries(DIAG).map(([g, c]) => [c, g === p || sec.includes(g) ? 1 : 0]));
 
 // ---------------------------------------------------------------------------
@@ -137,7 +144,7 @@ export async function apiLocal(metodo, url, b) {
     const c = await uno("casos", +id);
     if (!c) err("Caso no encontrado");
     if (c.estado === "validado" && yo.rol !== "dm") err("Caso validado: solo un data manager puede modificarlo");
-    const origen = ["formulario", "importacion", "relleno_no", "ia_revision"].includes(b.origen) ? b.origen : "formulario";
+    const origen = ["formulario", "importacion", "relleno_no", "ia_revision", "deshacer"].includes(b.origen) ? b.origen : "formulario";
     const cambios = [];
     const valores = { ...c.valores };
     if ("principal" in b || "secundarias" in b) {
@@ -161,11 +168,14 @@ export async function apiLocal(metodo, url, b) {
     if (cambios.some(([k]) => /^\((diagn|enfermedad)/.test(k)) && c.ia._diagnosticos && !c.ia._diagnosticos.revisado) { c.ia._diagnosticos.revisado = true; revisados.push("_diagnosticos"); }
     for (const k of b.ia_revisar === "*" ? Object.keys(c.ia) : b.ia_revisar || []) if (c.ia[k] && !c.ia[k].revisado) { c.ia[k].revisado = true; revisados.push(k); }
     revisados.forEach((k) => cambios.push(["(IA revisado)", null, k]));
+    // Deshacer una confirmación en bloque: esos datos de la IA vuelven a estar pendientes
+    for (const k of b.ia_desrevisar || []) if (c.ia[k]?.revisado && !revisados.includes(k)) { c.ia[k].revisado = false; cambios.push(["(IA: revisión deshecha)", null, k]); }
     if (b.estado && b.estado !== c.estado && ["borrador", "completo", "validado"].includes(b.estado)) {
       if ((b.estado === "validado" || c.estado === "validado") && yo.rol !== "dm") err("Solo un data manager puede validar");
       if (b.estado === "validado" && Object.values(valores).includes("DUDA")) err("No se puede validar: el caso tiene dudas sin resolver");
       const pend = iaPendientes({ ia: c.ia, valores });
       if (b.estado === "validado" && pend.length) err(`No se puede validar: quedan ${pend.length} datos de la IA sin revisar`);
+      if (b.estado === "validado" && eventosPosteriores(valores).length) err("No se puede validar: hay eventos con fecha posterior a la del último seguimiento");
       cambios.push(["(estado)", c.estado, b.estado]); c.estado = b.estado;
     }
     if (cambios.length) {
@@ -195,11 +205,34 @@ export async function apiLocal(metodo, url, b) {
     return { resultados };
   }
   if (R === "DELETE casos") {
-    if (yo.rol !== "dm") err("Solo los data managers pueden hacer esto");
+    const c = await uno("casos", +id);
+    if (!c) err("Caso no encontrado");
+    if (c.estado === "validado" && yo.rol !== "dm") err("Caso validado: solo un data manager puede eliminarlo");
+    // Papelera: el caso se guarda entero para poder recuperarlo
+    const papelera = (await kvGet("papelera")) || [];
+    papelera.unshift({ id: Date.now(), numero: c.numero, datos: c, borrado_por: yo.usuario, fecha: ahora() });
+    await kvSet("papelera", papelera.slice(0, 200));
     await tx("casos", "readwrite", (s) => s.delete(+id));
-    await auditar([{ numero: +id, usuario: yo.usuario, fecha: ahora(), campo: "(caso eliminado)", antes: null, despues: null, origen: "formulario" }]);
+    await auditar([{ numero: +id, usuario: yo.usuario, fecha: ahora(), campo: "(caso eliminado)", antes: c.estado, despues: null, origen: "formulario" }]);
     programarGuardado();
     return { ok: true };
+  }
+  if (R === "GET papelera") {
+    if (yo.rol !== "dm") err("Solo los data managers pueden hacer esto");
+    return ((await kvGet("papelera")) || []).map((f) => ({ id: f.id, numero: f.numero, principal: f.datos.principal, secundarias: f.datos.secundarias || [],
+      estado: f.datos.estado, borrado_por: f.borrado_por, fecha: f.fecha }));
+  }
+  if (R === "POST papelera") {
+    if (yo.rol !== "dm") err("Solo los data managers pueden hacer esto");
+    const papelera = (await kvGet("papelera")) || [];
+    const f = papelera.find((x) => x.id === +b.id);
+    if (!f) err("Ese caso ya no está en la papelera");
+    if (await uno("casos", f.numero)) err(`Ya existe otro caso con el número ${String(f.numero).padStart(4, "0")}: no se puede recuperar encima`);
+    await poner("casos", f.datos);
+    await kvSet("papelera", papelera.filter((x) => x !== f));
+    await auditar([{ numero: f.numero, usuario: yo.usuario, fecha: ahora(), campo: "(caso recuperado de la papelera)", antes: null, despues: null, origen: "formulario" }]);
+    programarGuardado();
+    return { ok: true, numero: f.numero };
   }
   if (R === "GET pistas") return { pistas: (await kvGet("pistas")) || {} };
   if (R === "PUT pistas") {
@@ -245,13 +278,14 @@ export async function apiLocal(metodo, url, b) {
 // ---------------------------------------------------------------------------
 // Exportación final (data manager)
 // ---------------------------------------------------------------------------
-export async function exportarRegistro(soloValidados = false, formato = "xlsx") {
+export async function exportarRegistro(soloValidados = false, formato = "xlsx", desconocido = "blanco") {
   const dic = await diccionario();
   const cab = cabeceraRegistro(dic);
   const val = valorador(dic, cab);
+  const opciones = { desconocido };
   const loc = await columnas(true);
   const casos = (await todos("casos")).filter((c) => !soloValidados || c.estado === "validado").sort((a, b) => a.numero - b.numero);
-  const reg = [cab, ...casos.flatMap((c) => filasDelCaso(dic, c, cab).map((x) => x.fila))]; // una fila por diagnóstico
+  const reg = [cab, ...casos.flatMap((c) => filasDelCaso(dic, c, cab, opciones).map((x) => x.fila))]; // una fila por diagnóstico
   const sello = ahora().replace(/[-:]/g, "").replace("T", "_").slice(0, 13);
   if (formato === "csv") {
     const csv = reg.map((f) => f.map((x) => { const s = String(x ?? ""); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(";")).join("\r\n");

@@ -67,7 +67,8 @@ export function construirModelo(dic) {
     }
     grupo = null;
     let tipoCampo;
-    if (codigo === "authored_at") tipoCampo = "auto";
+    if (txt(r.calcular)) tipoCampo = "calculado";  // se ve, pero no se edita (p. ej. filtrado glomerular MDRD)
+    else if (codigo === "authored_at") tipoCampo = "auto";
     else if (codigo === "patient_id") tipoCampo = "caso";
     else if (base.fijo || /Fijo/i.test(ctrl)) tipoCampo = "fijo";
     else if (base.tipo === "boolean, date") tipoCampo = "sinofecha";
@@ -146,7 +147,7 @@ export function progresoItems(items, v) {
     if (m === NC) { tot++; ok++; continue; }
     if (m === DUDA) { tot++; continue; }
     switch (it.tipoCampo) {
-      case "fijo": case "caso": case "auto": case "texto": continue;
+      case "fijo": case "caso": case "auto": case "texto": case "calculado": continue;
       case "single": tot++; if (it.opciones.some((o) => v[o.codigo] === 1)) ok++; break;
       case "multi": tot++; if (it.opciones.some((o) => v[o.codigo] === 1 || v[o.codigo] === 0)) ok++; break;
       case "sinofecha": tot++; if (v[it.codigo] === 0 || (v[it.codigo] === 1 && v[it.codigo + "_date"])) ok++; break;
@@ -206,7 +207,10 @@ export function valoresPorDefecto(modelo, v, { soloReglas = false, cambiados = n
   const todos = modelo.items.flatMap((it) => [it, ...(it.opciones || [])]);
   for (const it of todos) {
     const d = String(it.defecto ?? "").trim();
-    if (!d || (v[it.codigo] !== undefined && v[it.codigo] !== null)) continue;
+    if (!d) continue;
+    const conValor = v[it.codigo] !== undefined && v[it.codigo] !== null;
+    // con valor: solo se sustituye si es una regla y el campo ha dejado de mostrarse (p. ej. síncope = No)
+    if (conValor && (!d.includes("->") || !it.cond || it.cond.fn(v))) continue;
     if (d.includes("->")) {
       for (const regla of d.split(";")) {
         const m = regla.match(/([a-z0-9_]+)\s*=\s*(\S+)\s*->\s*(\S+)/i);

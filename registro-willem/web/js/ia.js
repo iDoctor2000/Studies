@@ -5,7 +5,8 @@
 //  caso.informes = [{ fecha_ingreso, fecha_alta, servicio, titulo, texto, indice }]
 // Un dato de la IA queda "pendiente" hasta que una persona lo confirma, lo cambia o lo borra.
 
-export const NOMBRE_ORIGEN = { ia: "IA", cabecera: "cabecera del informe", calculado: "calculado de los reingresos", deducido: "deducido" };
+export const NOMBRE_ORIGEN = { ia: "IA", cabecera: "cabecera del informe", calculado: "calculado de los reingresos", deducido: "deducido",
+  nombre: "deducido del nombre (en el Mac; el nombre no se guarda)" };
 
 const tieneValor = (x) => x !== null && x !== undefined && x !== "";
 
@@ -145,7 +146,7 @@ export function auditar(items, casos) {
     filas.push(f);
   }
   for (const it of items) {
-    if (["fijo", "caso", "auto"].includes(it.tipoCampo) || DE_DIAGNOSTICO.has(it.codigo)) continue;
+    if (["fijo", "caso", "auto", "calculado"].includes(it.tipoCampo) || DE_DIAGNOSTICO.has(it.codigo)) continue;
     const f = { it, propuestos: 0, avisos: 0, pendiente: 0, confirmado: 0, corregido: 0, quitado: 0, revisado: 0, olvidos: 0, detalle: [] };
     for (const c of conIA) {
       const m = c.ia[it.codigo];

@@ -11,6 +11,7 @@ que la IA solo se usa en este ordenador.
 """
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -24,7 +25,7 @@ import ia_simulada  # noqa: E402
 import informes_sinteticos as S  # noqa: E402
 from cliente import Cancelado, ClienteIA, ErrorIA, RespuestaCortada  # noqa: E402
 from extraer_ia import Extraccion, cita_en_informe, convertir, ejecutar, fecha_iso  # noqa: E402
-from preguntas import cargar_preguntas  # noqa: E402
+from preguntas import DIAG as DIAG_COD, cargar_preguntas  # noqa: E402
 from procesar_informes import buscar_pdfs, procesar  # noqa: E402
 
 FALLOS = []
@@ -117,6 +118,19 @@ def main():
     ok(v.get("hypertension") == 1 and v.get("diabetes_mellitus_type_2") == 1, "HTA sí y diabetes tipo 2")
     ok(v.get("nyha_class_ii") == 1, "NYHA II")
     ok(v.get("dob") == "1950-02-02" and v.get("biological_sex_male") == 1 and meta["dob"]["origen"] == "cabecera", "fecha de nacimiento y sexo desde la cabecera")
+    # 5ª ronda de Sergio: fechas de diagnóstico, ámbito y raza sin preguntar a la IA
+    fechas = {k: x for k, x in v.items() if k.endswith("_diagnosis_date")}
+    ok(fechas and set(fechas.values()) == {por_caso[1][0]["fecha_ingreso"]} and all(meta[k]["origen"] == "cabecera" and not meta[k]["aviso"] for k in fechas),
+       f"fechas de diagnóstico = fecha de ingreso del informe de alta ({', '.join(sorted(fechas))})")
+    ok(set(fechas) == {DIAG_COD[d["codigo"]] + "_diagnosis_date" for d in p1["diagnosticos"] if d["codigo"] in DIAG_COD}, "una fecha por cada diagnóstico del estudio propuesto")
+    ok(v.get("patient_care_setting_inpatient") == 1 and v.get("patient_care_setting_outpatient") == 0 and meta["patient_care_setting"]["origen"] == "cabecera",
+       "ámbito asistencial: hospitalizado (es un informe de alta)")
+    ok(v.get("racial_group_hispanic") == 1 and v.get("racial_group_caucasian") == 0 and meta["race"]["origen"] == "nombre" and not meta["race"]["aviso"],
+       "raza: la que dedujo la fase 1 del nombre (aquí, la de por defecto, sin aviso)")
+    enviado = " ".join(m["content"] for ll in llamadas for m in ll["messages"])
+    ok(not any(x in enviado for x in ("heart_failure_diagnosis_date:", "- race:", "patient_care_setting:", "glomerular_filtration_rate_mdrd:", "cardiorenal_syndrome:")),
+       "la IA no pregunta fechas de diagnóstico, raza, ámbito, filtrado glomerular ni síndrome cardiorrenal")
+    ok("life_expectancy_lt_24_months:" in enviado and "ESTIMACIÓN" in enviado, "sí estima la esperanza de vida < 24 meses, con su criterio")
     ok("no aparece literalmente" in meta["dyslipidaemia"]["aviso"], "la cita inventada (dislipemia) queda marcada")
     ok("Fuera del rango" in meta["resting_heart_rate"]["aviso"], "FC 400 → aviso de rango")
     ok(v.get("prior_arrhythmias") == 1 and meta["prior_arrhythmias"]["origen"] == "deducido", "arritmia previa deducida al haber FA (pregunta llave)")
@@ -166,7 +180,7 @@ def main():
     ia_simulada.AVERIAS.update(bucle=None)
     log = open(ruta_log, encoding="utf-8").read()
     ok(estado == "ok" and filas[0]["incidencias"] >= 1, "ejecutar: caso terminado con incidencias contadas")
-    ok("FALLO: Respuesta cortada: bucle" in log and "tanda 6/7" in log and "caso terminado" in log and "tokens" in log,
+    ok("FALLO: Respuesta cortada: bucle" in log and re.search(r"tanda \d+/\d+", log) and "caso terminado" in log and "tokens" in log,
        "el registro dice en qué tanda falló, por qué, cuánto tardó y cuántos tokens")
     ok(all(x not in log for x in ("ANTONIO", "FICTICIO", "CARM100000000001")), "el registro no lleva datos identificativos")
     ia.cancelar = threading.Event()
@@ -197,8 +211,8 @@ def main():
     ia_simulada.AVERIAS.update(fc_bien=True)  # como si la pista hubiera corregido el fallo
     pr, cambiadas = ext2.reextraer(json.loads(json.dumps(p1)), por_caso[1], {"resting_heart_rate", "dyslipidaemia"}, progreso=lambda *_: None)
     ia_simulada.AVERIAS.update(fc_bien=False)
-    ok(len(llamadas) - n0 == 2, f"solo se pregunta por esas variables ({len(llamadas) - n0} llamadas, no 8)")
-    ok("La FC es la de la exploración" in llamadas[-2]["messages"][-1]["content"] + llamadas[-1]["messages"][-1]["content"], "la pista viaja en la pregunta a la IA")
+    ok(len(llamadas) - n0 == 1, f"solo se pregunta por esas variables ({len(llamadas) - n0} llamada, no una por tanda)")
+    ok("La FC es la de la exploración" in llamadas[-1]["messages"][-1]["content"], "la pista viaja en la pregunta a la IA")
     ok(pr["valores"]["resting_heart_rate"] == 72 and not pr["ia"]["resting_heart_rate"]["aviso"] and cambiadas == 1, "FC 400 → 72: una respuesta cambiada")
     resto = lambda d: {k: v for k, v in d.items() if k != "resting_heart_rate"}  # noqa: E731
     ok(resto(pr["valores"]) == resto(p1["valores"]) and set(pr["ia"]) == set(p1["ia"]), "el resto de la propuesta no se toca")

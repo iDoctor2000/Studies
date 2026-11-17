@@ -8,6 +8,7 @@ import * as ENV from "./envio.js";
 import { comprobarClave, accesoConcedido, recordarAcceso } from "./acceso.js";
 import { iaPendientes, marcarPorCampos, NOMBRE_ORIGEN, auditar, diagnosticosTexto } from "./ia.js";
 import { crearXlsx, descargar } from "./xlsx.js";
+import { prepararValores } from "./registro.js";
 
 // ===========================================================================
 //  Utilidades
@@ -408,7 +409,7 @@ function pintarEstructura() {
         <div class="titulo">Trabajo</div>
         <a href="#/panel" data-pag="panel">${icono("panel")} Panel</a>
         <a href="#/casos" data-pag="casos">${icono("casos")} Casos <span class="contador" id="nCasos"></span></a>
-        <a href="#/dudas" data-pag="dudas">${icono("bandera")} Dudas <span class="contador aviso oculto" id="nDudas"></span></a>
+        <a href="#/dudas" data-pag="dudas">${icono("duda")} Dudas <span class="contador aviso oculto" id="nDudas"></span></a>
         <a href="#/diccionario" data-pag="diccionario">${icono("libro")} Diccionario</a>
         ${dm ? `<div class="titulo">Data manager</div>
         ${S.info?.nas ? "" : `<a href="#/llave" data-pag="llave">${icono("llave")} Libro llave</a>`}
@@ -567,7 +568,8 @@ async function pPanel() {
 //  LISTA DE CASOS
 // ===========================================================================
 async function pCasos(qs) {
-  barra("Casos", "Registro WILLEM", `<a class="btn primario" href="#/nuevo">${icono("mas")} Nuevo caso</a>`);
+  barra("Casos", "Registro WILLEM", `${esDM() ? `<button class="btn fantasma" id="bPapelera" title="Casos eliminados: se pueden recuperar">${icono("papelera")} Papelera</button>` : ""}<a class="btn primario" href="#/nuevo">${icono("mas")} Nuevo caso</a>`);
+  $("#bPapelera")?.addEventListener("click", abrirPapelera);
   await cargarCasos();
   const F = { enf: qs.get("enf") || "", estado: qs.get("estado") || "", q: "", nota: qs.get("revisar") === "1", ia: qs.get("ia") === "1" };
   const cont = $("#contenido");
@@ -593,7 +595,7 @@ async function pCasos(qs) {
           <td><span class="num-caso"><small>#</small>${pad(c.numero)}</span> ${tieneNota(c) ? `<span class="estrella on" title="${esc(c.valores.nota_revision)}">${icono("estrella")}</span>` : ""}</td>
           <td><div class="diags-celda">${diagnosticosDe(c).map((g) => pillEnf(g, diagnosticosDe(c).length > 1)).join(" ")}</div></td>
           <td><div style="display:flex;align-items:center;gap:10px">${anillo(c.progreso.pct, 40, 4.5)}<span class="sub">${c.progreso.ok}/${c.progreso.tot}</span></div></td>
-          <td>${estadoPill(c.estado)} ${c.dudas.length ? `<span class="pill sec" style="--c:#d97706" title="Dudas sin resolver">${icono("bandera")} ${c.dudas.length}</span>` : ""}${c.iaPend ? ` <span class="pill sec" style="--c:var(--ia)" title="Datos propuestos por la IA sin revisar">${icono("chispa")} ${c.iaPend}</span>` : ""}</td>
+          <td>${estadoPill(c.estado)} ${c.dudas.length ? `<span class="pill sec" style="--c:#d97706" title="Dudas sin resolver">${icono("duda")} ${c.dudas.length}</span>` : ""}${c.iaPend ? ` <span class="pill sec" style="--c:var(--ia)" title="Datos propuestos por la IA sin revisar">${icono("chispa")} ${c.iaPend}</span>` : ""}</td>
           <td>${pillEnvio(c)}</td>
           <td class="quien">${relativo(c.modificado)}<small>por ${esc(c.modificado_por)}</small></td></tr>`).join("")}
         </tbody></table>` : `<div class="vacio">${icono("casos")}<p>No hay casos con estos filtros.</p><a class="btn primario" href="#/nuevo">${icono("mas")} Crear un caso</a></div>`}
@@ -678,9 +680,11 @@ async function pCaso(num, tabId) {
   const tabs = pestanasDelCaso(S.modelo, E.caso);
   E.tab = tabs.find((t) => t.id === tabId) ? tabId : tabs[0].id; // siempre empieza por la primera pestaña ("Diagnósticos")
   E.cola = colaDe(num);
+  E.deshacer = null;
   barra(`Caso #${pad(num)}`, `<a href="#/casos">Casos</a> › ${esc(diagnosticosDe(E.caso).map((g) => ENFERMEDADES[g]?.corto || g).join(" · "))}`,
-    `<button class="btn ${vintageActivo() ? "on-vintage" : ""}" id="bVista" title="Vista compacta de escritorio: más variables por pantalla y manejo con teclado">${icono("vintage")} ${vintageActivo() ? "Modo normal" : "Modo Vintage"}</button>${E.caso.informes?.length ? `<button class="btn" id="bInforme">${icono("libro")} Informe${E.caso.informes.length > 1 ? `s (${E.caso.informes.length})` : ""}</button>` : ""}<button class="btn" id="bImp">${icono("importar")} Importar informe</button><button class="btn fantasma" id="bHist">${icono("historial")} Historial</button>`);
+    `<button class="btn ${vintageActivo() ? "on-vintage" : ""}" id="bVista" title="Vista compacta de escritorio: más variables por pantalla y manejo con teclado">${icono("vintage")} ${vintageActivo() ? "Modo normal" : "Modo Vintage"}</button>${E.caso.informes?.length ? `<button class="btn" id="bInforme">${icono("libro")} Informe${E.caso.informes.length > 1 ? `s (${E.caso.informes.length})` : ""}</button>` : ""}<button class="btn" id="bImp">${icono("importar")} Importar informe</button><button class="btn fantasma" id="bHist">${icono("historial")} Historial</button>${puedeEliminar(E.caso) ? `<button class="btn fantasma peligro-suave" id="bEliminar" title="Eliminar este caso (por ejemplo, si se creó por error)">${icono("papelera")} Eliminar</button>` : ""}`);
   $("#bInforme")?.addEventListener("click", () => abrirInforme());
+  $("#bEliminar")?.addEventListener("click", eliminarCaso);
   $("#bVista").onclick = () => alternarVintage(num);
   $("#bImp").onclick = abrirImportador;
   $("#bHist").onclick = abrirHistorial;
@@ -689,6 +693,7 @@ async function pCaso(num, tabId) {
 
 function pintarCaso(animar = false) {
   const c = E.caso, e = ENFERMEDADES[c.principal];
+  E.calc = null;  // los valores calculados se rehacen en cada pintado
   const tabs = pestanasDelCaso(S.modelo, c);
   if (!tabs.find((t) => t.id === E.tab)) E.tab = tabs[0].id;
   const tab = tabs.find((t) => t.id === E.tab);
@@ -714,7 +719,7 @@ function pintarCaso(animar = false) {
         <div class="t2">${esc(diags.length === 1 ? ENFERMEDADES[diags[0]].nombre : diags.map((g) => ENFERMEDADES[g].corto).join(" · "))}</div>
         <div class="secs">${diags.length > 1 ? diags.map((g) => `<span class="pill sec">${icono(g)} ${esc(ENFERMEDADES[g].nombre)}</span>`).join("") : ""}
           ${diags.includes("OTRO") && c.valores.other_disease ? `<span class="pill sec">${icono("OTRO")} ${esc(c.valores.other_disease)}</span>` : ""}
-          ${(() => { const d = dudasDelCaso(S.modelo, c); return d.length ? `<a class="pill sec duda-pill" href="#/caso/${c.numero}/${encodeURIComponent(d[0].pestana)}" title="Ir a la primera duda">${icono("bandera")} ${d.length} duda${d.length > 1 ? "s" : ""}</a>` : ""; })()}
+          ${(() => { const d = dudasDelCaso(S.modelo, c); return d.length ? `<a class="pill sec duda-pill" href="#/caso/${c.numero}/${encodeURIComponent(d[0].pestana)}" title="Ir a la primera duda">${icono("duda")} ${d.length} duda${d.length > 1 ? "s" : ""}</a>` : ""; })()}
           ${(() => { const n = iaPendientes(c).length; return n ? `<button class="pill sec ia-pill" id="bIAPend" title="Ir al primer dato de la IA sin revisar">${icono("chispa")} ${n} dato${n > 1 ? "s" : ""} de la IA por revisar</button>` : ""; })()}
           ${soloLectura() ? "" : `<button class="btn pequeno" id="bDiag">${icono("editar")} Diagnósticos</button>`}</div></div>
       <div class="der">
@@ -751,10 +756,12 @@ function pintarCaso(animar = false) {
         <div class="seccion-cab">
           <div>${tab.grupo ? pillEnf(tab.grupo) : ""}<h2 style="margin-top:${tab.grupo ? 8 : 0}px">${esc(tab.titulo)}</h2>
             <div class="sub">${pt.ok} de ${pt.tot} respondidos${tab.grupo ? " · campos específicos de esta enfermedad" : ""}</div></div>
-          <div class="der">${!soloLectura() && iaDePestana(tab, c).length ? `<button class="btn ia" id="bConfIA" title="Da por revisados los datos propuestos por la IA que se ven en esta pestaña">${icono("chispa")} Confirmar lo de la IA (${iaDePestana(tab, c).length})</button>` : ""}${soloLectura() ? "" : `<button class="btn fantasma" id="bRellenarNC" title="Pone Desconocido en todas las preguntas Sí/No y listas sin contestar de esta pestaña">${icono("interrogacion")} Resto: Desconocido</button>
+          <div class="der">${!soloLectura() && iaDePestana(tab, c).length ? `<button class="btn ia" id="bConfIA" title="Da por revisados los datos propuestos por la IA que se ven en esta pestaña">${icono("chispa")} Confirmar lo de la IA (${iaDePestana(tab, c).length})</button>` : ""}${soloLectura() ? "" : `<button class="btn fantasma" id="bRellenarNC" title="Pone Desconocido en todo lo que esté sin contestar en esta pestaña: -1 en las preguntas y los números, 00/00/0000 en las fechas">${GLIFO_NC} Resto: Desconocido</button>
             <button class="btn" id="bRellenar" title="Pone No en todas las preguntas Sí/No y listas con opción «No» o «Ninguno» que estén sin contestar en esta pestaña">${icono("varita")} Marcar el resto como No</button>`}</div>
         </div>
-        ${V ? `<div class="v-teclas" title="Con el foco en una pregunta">${icono("vintage")} <b>Teclado:</b> <kbd>S</kbd> Sí · <kbd>N</kbd> No · <kbd>?</kbd> Desconocido · <kbd>D</kbd> Duda · <kbd>Tab</kbd> o <kbd>↓</kbd> siguiente · <kbd>↑</kbd> anterior</div>` : ""}
+        ${E.deshacer ? `<div class="banda-deshacer">${icono("historial")}<span><b>${esc(E.deshacer.texto)}.</b> Si ha sido un error, puede volver atrás.</span>
+          <button class="btn pequeno" id="bDeshacer">${icono("flechaI")} Deshacer</button><button class="cerrar-x" id="bDeshacerX" title="Ocultar este aviso" aria-label="Ocultar">${icono("x")}</button></div>` : ""}
+        ${V ? `<div class="v-teclas" title="Con el foco en una pregunta">${icono("vintage")} <b>Teclado:</b> <kbd>S</kbd> Sí · <kbd>N</kbd> No · <kbd>-</kbd> Desconocido (-1) · <kbd>?</kbd> Duda · <kbd>Tab</kbd> o <kbd>↓</kbd> siguiente · <kbd>↑</kbd> anterior</div>` : ""}
         <div id="seccion" class="${V ? "v-paneles" : ""}">${V ? seccionVintage(tab, c) : tab.bloques.filter((b) => b.items.some((it) => visible(it, c.valores))).map((b) => `${b.grupo ? `<div class="bloque-tit bloque-enf" style="--c:${ENFERMEDADES[b.grupo].color}">${icono(b.grupo)} ${esc(b.subtitulo)}</div>`
           : b.subtitulo ? `<div class="bloque-tit">${esc(b.subtitulo)}</div>` : ""}
           <div class="campos">${b.items.filter((it) => visible(it, c.valores)).map((it) => campoHTML(it, c.valores, animar)).join("")}</div>`).join("")}</div>
@@ -806,8 +813,13 @@ function pintarCaso(animar = false) {
       html: `<p>Se darán por revisados los <b>${ks.length}</b> datos propuestos por la IA en <b>${esc(tab.titulo)}</b>.</p>
         ${conAviso ? `<p class="aviso-ia">${icono("aviso")} ${conAviso} de ellos tienen un aviso (fondo ámbar). Mírelos antes de confirmar.</p>` : ""}
         <p class="sub">Confírmelo solo si los ha comprobado con el informe. Quedará anotado en el historial.</p>` });
-    if (ok) revisarIA(ks, `${ks.length} datos de la IA confirmados`);
+    if (!ok) return;
+    await revisarIA(ks, `${ks.length} datos de la IA confirmados`);
+    const hechos = ks.filter((k) => E.caso.ia?.[k]?.revisado);
+    if (hechos.length) { E.deshacer = { texto: `${hechos.length} datos de la IA confirmados en «${tab.titulo}»`, valores: {}, puestos: {}, ia: hechos }; pintarCaso(); }
   });
+  $("#bDeshacer")?.addEventListener("click", deshacerUltimo);
+  $("#bDeshacerX")?.addEventListener("click", () => { E.deshacer = null; pintarCaso(); });
   $("#bEnviar")?.addEventListener("click", () => enviarAlRegistro(E.caso));
   $("#selEstado").onchange = async (ev) => { await cambiarEstado(ev.target.value, ev.target.selectedOptions[0].text); };
   $("#bFin")?.addEventListener("click", async () => {
@@ -819,13 +831,20 @@ function pintarCaso(animar = false) {
   $("#bRellenarNC")?.addEventListener("click", async () => {
     const vv = c.valores, cambios = {};
     for (const it of tab.bloques.flatMap((b) => b.items)) {
-      if (!admiteMarcas(it) || !visible(it, vv) || marcaDe(it, vv)) continue;
+      if (!visible(it, vv)) continue;
+      if (["numero", "entero", "fecha"].includes(it.tipoCampo)) { if (vv[it.codigo] == null) cambios[it.codigo] = NC; continue; }  // -1 y 00/00/0000
+      if (!admiteMarcas(it) || marcaDe(it, vv)) continue;
       if (it.opciones ? it.opciones.every((o) => vv[o.codigo] == null) : vv[it.codigo] == null) cambios[it.codigo] = NC;
+      // un Sí al que le falta la fecha: fecha desconocida
+      if (it.tipoCampo === "sinofecha" && vv[it.codigo] === 1 && vv[it.codigo + "_date"] == null) cambios[it.codigo + "_date"] = NC;
+      for (const o of it.opciones || []) if (o.conFecha && vv[o.codigo] === 1 && vv[o.codigo + "_date"] == null) cambios[o.codigo + "_date"] = NC;
     }
     const n = Object.keys(cambios).length;
-    if (!n) return toast("No hay preguntas sin contestar en esta pestaña", "info");
-    const ok = await modal({ titulo: "Marcar el resto como Desconocido", aceptar: `Poner Desconocido en ${n}`, html: `<p>Se marcarán como <b>Desconocido</b> (lo he buscado y no consta) las preguntas sin contestar de <b>${esc(tab.titulo)}</b>.</p><p class="sub">En el Excel final irán vacías. Quedará anotado en el historial.</p>` });
-    if (ok) { aplicar(cambios, "relleno_no"); toast(`${n} respuestas marcadas como Desconocido`); }
+    if (!n) return toast("No hay nada sin contestar en esta pestaña", "info");
+    const ok = await modal({ titulo: "Marcar el resto como Desconocido", aceptar: `Poner Desconocido en ${n}`, html: `<p>Se marcará como <b>Desconocido</b> (lo he buscado y no consta) todo lo que esté sin contestar en <b>${esc(tab.titulo)}</b>:</p>
+        <ul><li>preguntas Sí/No y listas: <b>-1</b></li><li>números: <b>-1</b></li><li>fechas: <b>${FECHA_NC}</b></li></ul>
+        <p class="sub">Quedará anotado en el historial. Si se equivoca, podrá deshacerlo.</p>` });
+    if (ok) { aplicarEnBloque(cambios, `${n} respuestas marcadas como Desconocido en «${tab.titulo}»`); toast(`${n} respuestas marcadas como Desconocido`); }
   });
   $("#bRellenar2")?.addEventListener("click", () => $("#bRellenar").click());
   $("#bNota")?.addEventListener("click", editarNota);
@@ -835,7 +854,7 @@ function pintarCaso(animar = false) {
     const n = new Set(Object.keys(cambios).map((k) => S.modelo.porCodigo[k]?.padre?.codigo || k)).size;
     if (!n) return toast("No hay preguntas Sí/No pendientes en esta pestaña", "info");
     const ok = await modal({ titulo: "Marcar el resto como No", aceptar: `Poner No en ${n}`, html: `<p>Se pondrá <b>No</b> en las preguntas de <b>${esc(tab.titulo)}</b> que estén sin contestar: las Sí/No y las listas que tengan la opción «No» o «Ninguno» (tabaquismo, diabetes, trastornos de la conducción…).</p><p class="sub">Lo ya marcado (Sí, Desconocido, Duda), los números y las fechas no se tocan. Quedará anotado en el historial.</p>` });
-    if (ok) { aplicar(cambios, "relleno_no"); toast(`${n} respuestas puestas a No`); }
+    if (ok) { aplicarEnBloque(cambios, `${n} respuestas puestas a No en «${tab.titulo}»`); toast(`${n} respuestas puestas a No`); }
   });
   const sec = $("#seccion");
   sec.addEventListener("click", alClicar);
@@ -887,6 +906,7 @@ async function cambiarEstado(valor, texto) {
     html: `<p>Este paciente tiene una nota de revisión (★):</p><blockquote class="cita-nota">${esc(c.valores.nota_revision)}</blockquote><p class="sub">Si ya está revisado, puede borrar la nota desde la estrella.</p>` }))) { pintarCaso(); return false; }
   if (valor === "validado" && dudasDelCaso(S.modelo, c).length) { toast("No se puede validar: hay dudas sin resolver en este caso", "mal"); pintarCaso(); return false; }
   if (valor === "validado" && iaPendientes(c).length) { toast(`No se puede validar: quedan ${iaPendientes(c).length} datos de la IA sin revisar`, "mal"); pintarCaso(); return false; }
+  if (valor === "validado" && L.eventosPosteriores(c.valores).length) { toast("No se puede validar: hay eventos con fecha posterior a la del último seguimiento (pestaña Seguimiento)", "mal"); pintarCaso(); return false; }
   try { E.caso = conInformes(await api("PUT", "casos/" + c.numero, { estado: valor })); toast("Estado: " + texto); pintarCaso(); return true; }
   catch (er) { toast(er.message, "mal"); pintarCaso(); return false; }
 }
@@ -914,8 +934,8 @@ async function alternarVintage(num) {
         html: `<p>Vista compacta, al estilo de las bases de datos de siempre: <b>muchas más variables por pantalla</b>, sin apenas desplazarse.</p>
           <ul class="lista-vintage">
             <li>Cada bloque es un panel; las pestañas van arriba.</li>
-            <li>Botones pequeños <b>NO · SÍ · ¿? · ${icono("bandera")}</b> (¿? = Desconocido, bandera = Duda). Pulsar otra vez el botón marcado lo deja sin contestar.</li>
-            <li><b>Con el teclado:</b> <kbd>S</kbd> Sí, <kbd>N</kbd> No, <kbd>?</kbd> Desconocido, <kbd>D</kbd> Duda; pasa sola a la siguiente pregunta. <kbd>Tab</kbd>, <kbd>↓</kbd> y <kbd>↑</kbd> para moverse.</li>
+            <li>Botones pequeños <b>NO · SÍ · -1 · ?</b> (-1 = Desconocido, ? = Duda). Pulsar otra vez el botón marcado lo deja sin contestar.</li>
+            <li><b>Con el teclado:</b> <kbd>S</kbd> Sí, <kbd>N</kbd> No, <kbd>-</kbd> Desconocido, <kbd>?</kbd> Duda; pasa sola a la siguiente pregunta. <kbd>Tab</kbd>, <kbd>↓</kbd> y <kbd>↑</kbd> para moverse.</li>
             <li>Un punto ámbar marca lo que falta por contestar. Deje el ratón sobre una pregunta para ver su ayuda y su código.</li>
           </ul>
           <p class="sub">Los datos, el guardado automático y el Excel final son exactamente los mismos. Solo para pantalla de escritorio; puede volver al modo normal con el mismo botón.</p>` });
@@ -924,6 +944,117 @@ async function alternarVintage(num) {
   pCaso(num, E.tab);
 }
 addEventListener("resize", () => { if (E.caso && $("#seccion") && E.vintage !== vintageActivo()) pintarCaso(); });
+
+// ---------------------------------------------------------------------------
+//  DESCONOCIDO (se ve como -1; en fechas, 00/00/0000) y DUDA (se ve como ?)
+//  Por dentro los dos siguen siendo las marcas NC y DUDA: lo que cambia es cómo se enseñan.
+// ---------------------------------------------------------------------------
+const GLIFO_NC = `<b class="g-nc">-1</b>`;
+const FECHA_NC = "00/00/0000";
+const esFechaNC = (txt) => /^0{1,2}[\/.\-]?0{1,2}[\/.\-]?0{4}$/.test(String(txt).trim());
+const textoFecha = (x) => (x === NC ? FECHA_NC : isoAFecha(x));
+const esFechaEvento = (k) => ["death_date", "rehospitalization_hf_date", "rehospitalization_no_hf_date"].includes(k) || (k.startsWith("mace_") && k.endsWith("_date"));
+const esIso = (x) => /^\d{4}-\d{2}-\d{2}/.test(String(x || ""));
+/** Valores con los cálculos hechos (filtrado glomerular…), para enseñarlos en el formulario. Se calculan una vez por pintado. */
+const calculados = () => (E.calc ||= prepararValores(S.dic, E.caso));
+const botonInfo = (k, clase) => `<button type="button" class="${clase}" data-info="${esc(k)}" tabindex="-1" title="Qué es esta variable: nombre y definición completa" aria-label="Información de la variable">i</button>`;
+
+/** Ficha de una variable: nombre, definición completa, código, valores posibles… */
+function abrirInfoVariable(k) {
+  const it = S.modelo.porCodigo[k];
+  if (!it) return;
+  const base = it.padre || it;
+  const fila = (S.dic.campos || []).find((f) => String(f.codigo_variable) === base.codigo) || {};
+  const nombre = (cod) => { const x = S.modelo.porCodigo[cod]; return x ? `«${x.padre ? x.padre.etiqueta + ": " + x.etiqueta : x.etiqueta}»` : cod; };
+  const cond = String(fila.mostrar_solo_si || "").trim().replace(/([a-z0-9_]+)\s*(=|!=)\s*(\S+)/gi, (_, c, op, val) =>
+    `${nombre(c)} ${op === "=" ? "es" : "no es"} ${val === "1" ? "Sí" : val === "0" ? "No" : val}`).replace(/\s+O\s+/g, " o ").replace(/\s+Y\s+/g, " y ");
+  const TIPOS = { sino: "Sí / No", sinofecha: "Sí / No, con fecha si es Sí", single: "Lista: se elige una opción", multi: "Lista: se pueden marcar varias",
+    numero: "Número", entero: "Número entero", fecha: "Fecha (dd/mm/aaaa)", texto: "Texto libre", calculado: "Se calcula sola (no se escribe)", fijo: "Valor fijo" };
+  const ayuda = base.ayuda && !/^DUPLICADO|Solapa/.test(base.ayuda) ? base.ayuda : "";
+  const marcas = ["sino", "sinofecha", "single", "multi"].includes(base.tipoCampo)
+    ? `Sí = 1 · No = 0 · Desconocido = ${GLIFO_NC} · Duda = <b>?</b>` : ["numero", "entero"].includes(base.tipoCampo) ? `Desconocido = ${GLIFO_NC}`
+    : base.tipoCampo === "fecha" ? `Desconocida = <b>${FECHA_NC}</b>` : "";
+  const filas = [
+    ["Definición", ayuda ? esc(ayuda) : `<span class="sub">El diccionario no trae una definición más larga para esta variable.</span>`],
+    base.original ? ["Nombre original (CRF)", `<i>${esc(base.original)}</i>`] : null,
+    ["Cómo se contesta", esc(TIPOS[base.tipoCampo] || base.tipoCampo) + (base.unidad ? ` · en <b>${esc(base.unidad)}</b>` : "")
+      + (base.min != null && base.max != null ? ` · rango esperado ${String(base.min).replace(".", ",")}–${String(base.max).replace(".", ",")}` : "")],
+    base.opciones ? ["Opciones", `<ul class="info-ops">${base.opciones.map((o) => `<li>${esc(o.etiqueta)} <code>${esc(o.codigo)}</code></li>`).join("")}</ul>`] : null,
+    marcas ? ["Valores especiales", marcas] : null,
+    cond ? ["Cuándo se pregunta", "Solo si " + esc(cond)] : null,
+    !base.grupos.includes("COMUN") ? ["Diagnósticos", base.grupos.map((g) => esc(ENFERMEDADES[g]?.nombre || g)).join(" · ")] : null,
+    ["Código en el registro", `<code>${esc(base.codigo)}</code>${base.provisional ? ` <span class="prov">PROVISIONAL</span>` : ""}${base.local ? ` <span class="sub">(variable propia: no va al registro)</span>` : ""}`],
+    fila.columnas_en_exportacion && !String(fila.columnas_en_exportacion).startsWith("(") ? ["Columnas en el Excel", String(fila.columnas_en_exportacion).split(";").map((c) => `<code>${esc(c.trim())}</code>`).join(" ")] : null,
+    base.pista ? ["Criterio para la IA", esc(base.pista)] : null,
+  ].filter(Boolean);
+  modal({ titulo: base.etiqueta, cancelar: "", aceptar: "Cerrar",
+    html: `<dl class="info-var-ficha">${filas.map(([a, b]) => `<dt>${a}</dt><dd>${b}</dd>`).join("")}</dl>` });
+}
+
+// ---------------------------------------------------------------------------
+//  DESHACER la última orden en bloque («Confirmar lo de la IA», «Resto: Desconocido», «Marcar el resto como No»)
+// ---------------------------------------------------------------------------
+/** Aplica cambios en bloque y recuerda cómo estaba todo para poder deshacerlo. */
+function aplicarEnBloque(cambios, texto) {
+  const antes = { ...E.caso.valores };
+  aplicar(cambios, "relleno_no");
+  const ahora = E.caso.valores, valores = {}, puestos = {};
+  for (const k of new Set([...Object.keys(antes), ...Object.keys(ahora)])) {
+    if ((antes[k] ?? null) !== (ahora[k] ?? null)) { valores[k] = antes[k] ?? null; puestos[k] = ahora[k] ?? null; }
+  }
+  E.deshacer = { texto, valores, puestos, ia: [] };
+}
+async function deshacerUltimo() {
+  const d = E.deshacer;
+  if (!d) return;
+  E.deshacer = null;
+  await vaciarPendientes();
+  try {
+    if (d.ia.length) E.caso = conInformes(await api("PUT", "casos/" + E.caso.numero, { ia_desrevisar: d.ia, origen: "deshacer" }));
+    // solo se devuelve lo que sigue como lo dejó la orden: lo que se haya cambiado después a mano se respeta
+    const cambios = {};
+    for (const [k, previo] of Object.entries(d.valores)) if ((E.caso.valores[k] ?? null) === (d.puestos[k] ?? null)) cambios[k] = previo;
+    toast("Deshecho: " + d.texto.toLowerCase());
+    if (Object.keys(cambios).length) aplicar(cambios, "deshacer"); else pintarCaso();
+  } catch (e) { toast(e.message, "mal"); pintarCaso(); }
+}
+
+// ---------------------------------------------------------------------------
+//  ELIMINAR UN CASO (queda en la papelera, de donde un data manager puede recuperarlo)
+// ---------------------------------------------------------------------------
+const puedeEliminar = (c) => c && (c.estado !== "validado" || esDM());
+async function eliminarCaso() {
+  const c = E.caso;
+  const ok = await modal({ titulo: `Eliminar el caso #${pad(c.numero)}`, aceptar: "Eliminar el caso", peligro: true,
+    html: `<p>Se eliminará <b>todo el caso #${pad(c.numero)}</b> (${esc(diagnosticosDe(c).map((g) => ENFERMEDADES[g]?.corto || g).join(" · "))}) con todos sus datos.</p>
+      <p class="sub">Úselo para casos creados por error o repetidos. Queda anotado quién lo elimina y cuándo, y el caso se guarda en la papelera:
+      un data manager puede recuperarlo.</p>
+      <form class="form" onsubmit="return false"><label>Para confirmar, escriba el número del caso<input class="inp" id="confNum" inputmode="numeric" autocomplete="off" placeholder="${pad(c.numero)}"></label><div class="error"></div></form>`,
+    alAceptar: (m) => { if (parseInt($("#confNum", m).value, 10) !== c.numero) throw new Error("El número no coincide con el del caso"); } });
+  if (!ok) return;
+  await vaciarPendientes();
+  try {
+    await api("DELETE", "casos/" + c.numero);
+    S.casos = S.casos.filter((x) => x.numero !== c.numero);
+    toast(`Caso #${pad(c.numero)} eliminado`);
+    const sig = E.cola?.sig || E.cola?.ant;
+    E.caso = null;
+    location.hash = sig ? `#/caso/${sig}` : "#/casos";
+  } catch (e) { toast(e.message, "mal"); }
+}
+async function abrirPapelera() {
+  const filas = await api("GET", "papelera");
+  const cj = cajon("Papelera", `${filas.length} caso${filas.length === 1 ? "" : "s"} eliminado${filas.length === 1 ? "" : "s"}`, "papelera");
+  cj.cuerpo.innerHTML = filas.length ? `<p class="sub">Casos eliminados. Al recuperar uno vuelve a la lista tal como estaba.</p><ul class="lista-aud">${filas.map((f) => `
+      <li><div><b>#${pad(f.numero)}</b> ${[f.principal, ...(f.secundarias || [])].filter(Boolean).map((g) => pillEnf(g, true)).join(" ")} ${estadoPill(f.estado)}
+        <div class="sub">Eliminado ${relativo(f.fecha)} por ${esc(f.borrado_por)}</div></div>
+        <button class="btn pequeno" data-rec="${f.id}">Recuperar</button></li>`).join("")}</ul>`
+    : `<div class="vacio">${icono("papelera")}<p>La papelera está vacía.</p></div>`;
+  $$("[data-rec]", cj.cuerpo).forEach((b) => (b.onclick = async () => {
+    try { const r = await api("POST", "papelera", { id: +b.dataset.rec }); toast(`Caso #${pad(r.numero)} recuperado`); cj.cerrar?.(); S.casos = []; enrutar(); }
+    catch (e) { toast(e.message, "mal"); }
+  }));
+}
 
 const enfocable = (fila) => fila && (fila.querySelector('[data-foco][tabindex="0"]') || fila.querySelector("input[data-foco], select[data-foco]") || fila.querySelector("[data-foco]"));
 
@@ -949,7 +1080,7 @@ function campoVintage(it, v) {
       default: return v[it.codigo] != null && v[it.codigo] !== "";
     }
   })();
-  const cuenta = !["fijo", "caso", "auto", "texto"].includes(it.tipoCampo);
+  const cuenta = !["fijo", "caso", "auto", "texto", "calculado"].includes(it.tipoCampo);
   const mIA = E.caso?.ia?.[it.codigo];
   const conValor = mIA && (mIA.codigos || []).some((x) => v[x] != null && v[x] !== "");
   const pendIA = conValor && !mIA.revisado;
@@ -957,8 +1088,8 @@ function campoVintage(it, v) {
   const ayuda = it.ayuda && !/^DUPLICADO|Solapa/.test(it.ayuda) ? it.ayuda : "";
   const tip = esc([it.etiqueta, ayuda, it.min != null && it.max != null ? `Rango esperado: ${it.min}–${it.max}${it.unidad ? " " + it.unidad : ""}` : "", "Código: " + it.codigo].filter(Boolean).join("\n"));
   const fechaInp = (kk, val, tit = "") => `<input type="text" class="inp fecha" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="dd/mm/aaaa" title="${esc(tit)}"
-      data-in="${esc(kk)}" data-t="fecha" data-foco="${esc(kk)}" value="${esc(isoAFecha(val))}">`;
-  const marcas = () => `<button class="vm nc ${mk === NC ? "on" : ""}" data-marca="${NC}" data-mk="${k}" tabindex="-1" title="Desconocido: lo he buscado y no consta (tecla ?)">¿?</button><button class="vm duda ${mk === DUDA ? "on" : ""}" data-marca="${DUDA}" data-mk="${k}" tabindex="-1" title="Duda: que lo revise un data manager (tecla D)">${icono("bandera")}</button>`;
+      data-in="${esc(kk)}" data-t="fecha" data-foco="${esc(kk)}" value="${esc(textoFecha(val))}">`;
+  const marcas = () => `<button class="vm nc ${mk === NC ? "on" : ""}" data-marca="${NC}" data-mk="${k}" tabindex="-1" title="Desconocido: lo he buscado y no consta (tecla -)">-1</button><button class="vm duda ${mk === DUDA ? "on" : ""}" data-marca="${DUDA}" data-mk="${k}" tabindex="-1" title="Duda: que lo revise un cardiólogo (tecla ? o D)">?</button>`;
   let ctrl = "", extra = "", ancho = false;
   switch (it.tipoCampo) {
     case "fijo": ctrl = `<span class="v-fijo">${esc(it.fijo || v[it.codigo] || "")}</span>`; break;
@@ -989,21 +1120,29 @@ function campoVintage(it, v) {
     case "numero":
     case "entero": {
       const x = v[it.codigo];
-      const fuera = x != null && ((it.min != null && x < it.min) || (it.max != null && x > it.max));
-      ctrl = `<input class="inp num ${fuera ? "fuera" : ""}" data-in="${k}" data-t="${it.tipoCampo}" data-foco="${k}" inputmode="decimal" value="${x == null ? "" : String(x).replace(".", ",")}" title="${fuera ? "Fuera del rango esperado. " : ""}${it.min != null && it.max != null ? `Rango: ${it.min}–${it.max}` : ""}">${it.unidad ? `<span class="v-un">${esc(it.unidad)}</span>` : ""}`;
+      const fuera = typeof x === "number" && ((it.min != null && x < it.min) || (it.max != null && x > it.max));
+      ctrl = `<input class="inp num ${fuera ? "fuera" : ""}" data-in="${k}" data-t="${it.tipoCampo}" data-foco="${k}" inputmode="decimal" value="${x == null ? "" : x === NC ? "-1" : String(x).replace(".", ",")}" title="${x === NC ? "Desconocido (-1). " : ""}${fuera ? "Fuera del rango esperado. " : ""}${it.min != null && it.max != null ? `Rango: ${it.min}–${it.max}` : ""}">${it.unidad ? `<span class="v-un">${esc(it.unidad)}</span>` : ""}`;
       break;
     }
-    case "fecha": ctrl = fechaInp(it.codigo, v[it.codigo]); break;
+    case "fecha":
+      ctrl = fechaInp(it.codigo, v[it.codigo]);
+      if (it.codigo === "follow_up_date" && !soloLectura()) ctrl += `<button class="vm hoy" data-hoy="${k}" tabindex="-1" title="Poner la fecha de hoy: última fecha en la que sabemos que el paciente está vivo">Hoy</button>`;
+      break;
+    case "calculado": {
+      const x = calculados()[it.codigo];
+      ctrl = `<span class="v-fijo v-calc" title="Se calcula sola: no se escribe">${x == null || x === "" || esMarca(x) ? "—" : esc(String(x).replace(".", ","))}${it.unidad ? ` <span class="v-un">${esc(it.unidad)}</span>` : ""}</span>`;
+      break;
+    }
     default:
       ancho = true;
       ctrl = `<input class="inp vtxt" data-in="${k}" data-t="texto" data-foco="${k}" value="${esc(v[it.codigo] || "")}" placeholder="Texto libre…">`;
   }
-  if (mk === DUDA) extra += `<div class="vx duda">${icono("bandera")}<input class="inp vtxt" data-in="${k}_duda_nota" data-t="texto" data-foco="${k}_duda_nota" placeholder="¿Cuál es la duda?" value="${esc(v[it.codigo + "_duda_nota"] || "")}"></div>`;
+  if (mk === DUDA) extra += `<div class="vx duda">${icono("duda")}<input class="inp vtxt" data-in="${k}_duda_nota" data-t="texto" data-foco="${k}_duda_nota" placeholder="¿Cuál es la duda?" value="${esc(v[it.codigo + "_duda_nota"] || "")}"></div>`;
   return `<div class="vf ${resp ? "resp" : cuenta ? "falta" : ""} ${mk === DUDA ? "con-duda" : ""} ${ancho ? "ancho" : ""} ${pendIA ? "ia-pend" + (mIA.aviso ? " ia-aviso" : "") : ""}" data-k="${k}">
-    <div class="vl" title="${tip}"><span>${esc(it.etiqueta)}</span>${it.provisional ? `<sup title="Código provisional (no existe en el CRF oficial)">P</sup>` : ""}${chipIA}</div><div class="vc">${ctrl}</div>${extra}</div>`;
+    <div class="vl" title="${tip}"><span>${esc(it.etiqueta)}</span>${botonInfo(it.codigo, "vi")}${it.provisional ? `<sup title="Código provisional (no existe en el CRF oficial)">P</sup>` : ""}${chipIA}</div><div class="vc">${ctrl}</div>${extra}</div>`;
 }
 
-/** Teclado del Modo Vintage: S / N / ? / D contestan y pasan a la siguiente; flechas para moverse. */
+/** Teclado del Modo Vintage: S / N / - (desconocido) / ? o D (duda) contestan y pasan a la siguiente; flechas para moverse. */
 function teclaVintage(ev) {
   if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
   const fila = ev.target.closest(".vf");
@@ -1030,8 +1169,8 @@ function teclaVintage(ev) {
     if (t === "s") b = fila.querySelector('[data-sino][data-val="1"]');
     if (t === "n") b = fila.querySelector('[data-sino][data-val="0"]');
   }
-  if (ev.key === "?" || ev.key === "¿") b = fila.querySelector('[data-marca="NC"]');
-  if (t === "d") b = fila.querySelector('[data-marca="DUDA"]');
+  if (ev.key === "-") b = fila.querySelector('[data-marca="NC"]');
+  if (t === "d" || ev.key === "?" || ev.key === "¿") b = fila.querySelector('[data-marca="DUDA"]');
   if (!b) return;
   ev.preventDefault();
   const esDuda = b.dataset.marca === DUDA;
@@ -1058,15 +1197,15 @@ function campoHTML(it, v, animar) {
   const pendIA = mIA && !mIA.revisado && (mIA.codigos || []).some((k) => v[k] != null && v[k] !== "");
   const chipIA = mIA && (mIA.codigos || []).some((k) => v[k] != null && v[k] !== "")
     ? `<button class="ia-chip ${pendIA ? "pend" : ""} ${pendIA && mIA.aviso ? "aviso" : ""}" data-ia="${esc(it.codigo)}" title="${pendIA ? "Propuesto por la IA: pulse para ver de dónde lo saca" : "Dato de la IA ya revisado"}">${icono("chispa")}IA${pendIA ? "" : " ✓"}</button>` : "";
-  const cab = `<div class="lab"><span>${esc(it.etiqueta)}${prov}</span>${chipIA}${cod}</div>${ayuda}`;
+  const cab = `<div class="lab"><span>${esc(it.etiqueta)}${prov}</span>${chipIA}${botonInfo(it.codigo, "info-var")}${cod}</div>${ayuda}`;
   const fechaInp = (k, val) => `<input type="text" class="inp fecha" inputmode="numeric" autocomplete="off" maxlength="10" placeholder="dd/mm/aaaa"
-      data-in="${esc(k)}" data-t="fecha" data-foco="${esc(k)}" value="${esc(isoAFecha(val))}">`;
+      data-in="${esc(k)}" data-t="fecha" data-foco="${esc(k)}" value="${esc(textoFecha(val))}">`;
   const limpiar = (ks) => `<button class="limpiar" data-limpiar="${esc(ks.join(","))}" title="Borrar respuesta">${icono("x")}</button>`;
   let ctrl = "", ancho = false, aviso = "";
   const botonesMarca = () => `<div class="marcas-bt">
-      <button class="mb ${mk === NC ? "on nc" : ""}" data-marca="${NC}" data-mk="${esc(it.codigo)}" title="Desconocido: lo he buscado y no consta">${icono("interrogacion")}<span>Desconocido</span></button>
-      <button class="mb ${mk === DUDA ? "on duda" : ""}" data-marca="${DUDA}" data-mk="${esc(it.codigo)}" title="Duda: que lo revise un cardiólogo revisor o un data manager">${icono("bandera")}<span>Duda</span></button></div>`;
-  const notaDuda = () => mk === DUDA ? `<div class="nota-duda">${icono("bandera")}<input class="inp" data-in="${esc(it.codigo)}_duda_nota" data-t="texto" data-foco="${esc(it.codigo)}_duda_nota"
+      <button class="mb ${mk === NC ? "on nc" : ""}" data-marca="${NC}" data-mk="${esc(it.codigo)}" title="Desconocido: lo he buscado y no consta (se guarda como -1)">${GLIFO_NC}<span>Desconocido</span></button>
+      <button class="mb ${mk === DUDA ? "on duda" : ""}" data-marca="${DUDA}" data-mk="${esc(it.codigo)}" title="Duda: que lo revise un cardiólogo revisor o un data manager">${icono("duda")}<span>Duda</span></button></div>`;
+  const notaDuda = () => mk === DUDA ? `<div class="nota-duda">${icono("duda")}<input class="inp" data-in="${esc(it.codigo)}_duda_nota" data-t="texto" data-foco="${esc(it.codigo)}_duda_nota"
       placeholder="¿Cuál es la duda? Ej.: «IMC 29,8: ¿cuenta como obesidad?»" value="${esc(v[it.codigo + "_duda_nota"] || "")}"></div>` : "";
 
   switch (it.tipoCampo) {
@@ -1100,14 +1239,23 @@ function campoHTML(it, v, animar) {
     case "numero":
     case "entero": {
       const x = v[it.codigo];
-      const fuera = x != null && ((it.min != null && x < it.min) || (it.max != null && x > it.max));
-      ctrl = `<input class="inp num ${fuera ? "fuera" : ""}" data-in="${esc(it.codigo)}" data-t="${it.tipoCampo}" data-foco="${esc(it.codigo)}" inputmode="decimal" value="${x == null ? "" : String(x).replace(".", ",")}">
+      const fuera = typeof x === "number" && ((it.min != null && x < it.min) || (it.max != null && x > it.max));
+      ctrl = `<input class="inp num ${fuera ? "fuera" : ""}" data-in="${esc(it.codigo)}" data-t="${it.tipoCampo}" data-foco="${esc(it.codigo)}" inputmode="decimal" value="${x == null ? "" : x === NC ? "-1" : String(x).replace(".", ",")}">
         ${it.unidad ? `<span class="unidad">${esc(it.unidad)}</span>` : ""}${it.min != null && it.max != null ? `<span class="rango">${String(it.min).replace(".", ",")}–${String(it.max).replace(".", ",")}</span>` : ""}`;
       if (fuera) aviso = `<div class="aviso-r">${icono("aviso")} Fuera del rango esperado. Compruebe el valor.</div>`;
+      if (x === NC) ctrl += `<span class="nota-nc">Desconocido</span>`;
       break;
     }
     case "fecha":
-      ctrl = fechaInp(it.codigo, v[it.codigo]); break;
+      ctrl = fechaInp(it.codigo, v[it.codigo]);
+      if (v[it.codigo] === NC) ctrl += `<span class="nota-nc">Desconocida</span>`;
+      if (it.codigo === "follow_up_date" && !soloLectura()) ctrl += `<button class="btn pequeno" data-hoy="${esc(it.codigo)}" title="Última fecha en la que sabemos que el paciente está vivo">${icono("check")} Hoy</button>`;
+      break;
+    case "calculado": {
+      const x = calculados()[it.codigo];
+      ctrl = `<span class="fijo calc">${icono("varita")} ${x == null || x === "" || esMarca(x) ? "Se calculará al rellenar los datos de los que depende" : `<b>${esc(String(x).replace(".", ","))}</b>${it.unidad ? " " + esc(it.unidad) : ""}`}</span>`;
+      break;
+    }
     default:
       ancho = true;
       ctrl = `<textarea class="inp" data-in="${esc(it.codigo)}" data-t="texto" data-foco="${esc(it.codigo)}" placeholder="Texto libre…">${esc(v[it.codigo] || "")}</textarea>`;
@@ -1118,10 +1266,18 @@ function campoHTML(it, v, animar) {
 function alClicar(ev) {
   const ia = ev.target.closest("[data-ia]");
   if (ia) return abrirDatoIA(ia.dataset.ia);
+  const inf = ev.target.closest("[data-info]");
+  if (inf) return abrirInfoVariable(inf.dataset.info);
   if (soloLectura()) return;
   const v = E.caso.valores;
   const b = ev.target.closest("button");
   if (!b) return;
+  if (b.dataset.hoy) {
+    const k = b.dataset.hoy, hoy = hoyIso();
+    if (v[k] === hoy) return toast("Ya tiene la fecha de hoy", "info");
+    aplicar({ [k]: hoy });
+    return toast("Fecha del último seguimiento: hoy, " + isoAFecha(hoy));
+  }
   if (b.dataset.marca) {
     const k = b.dataset.mk, m = b.dataset.marca, it = S.modelo.porCodigo[k];
     const cambios = {};
@@ -1210,15 +1366,29 @@ function alCambiar(ev) {
       const x = Number(val.replace(/\s/g, "").replace(",", "."));
       if (!isFinite(x)) { toast("Escriba un número (use coma o punto para decimales)", "mal"); el.value = E.caso.valores[k] ?? ""; return; }
       if (t === "entero" && !Number.isInteger(x)) { toast("Este campo es un número entero", "mal"); el.value = E.caso.valores[k] ?? ""; return; }
-      val = x;
+      val = x === -1 ? NC : x;  // -1 = Desconocido
     }
   } else if (t === "fecha") {
     if (val === "") val = null;
+    else if (esFechaNC(val)) val = NC;  // 00/00/0000 = fecha desconocida
     else {
       const iso = fechaAIso(val);
       if (!iso) { toast("Fecha no válida. Escríbala como dd/mm/aaaa (por ejemplo 16/04/1950)", "mal"); el.value = isoAFecha(E.caso.valores[k]); el.focus(); return; }
       if (iso > hoyIso()) { toast("La fecha no puede ser posterior a hoy", "mal"); el.value = isoAFecha(E.caso.valores[k]); el.focus(); return; }
-      if (iso < "1900-01-01") { toast("Revise el año: es anterior a 1900", "mal"); el.value = isoAFecha(E.caso.valores[k]); el.focus(); return; }
+      if (iso < "1900-01-01") { toast("Revise el año: es anterior a 1900", "mal"); el.value = textoFecha(E.caso.valores[k]); el.focus(); return; }
+      // Seguimiento: ningún evento puede ser posterior a la fecha del último seguimiento
+      const vv = E.caso.valores;
+      if (esFechaEvento(k) && esIso(vv.follow_up_date) && iso > vv.follow_up_date.slice(0, 10)) {
+        toast(`La fecha de un evento no puede ser posterior a la del último seguimiento (${isoAFecha(vv.follow_up_date)}). Si es correcta, cambie antes la fecha del último seguimiento.`, "mal");
+        el.value = textoFecha(vv[k]); el.focus(); return;
+      }
+      if (k === "follow_up_date") {
+        const post = Object.keys(vv).filter((x) => esFechaEvento(x) && esIso(vv[x]) && vv[x].slice(0, 10) > iso);
+        if (post.length) {
+          toast(`Hay ${post.length === 1 ? "un evento" : post.length + " eventos"} con fecha posterior (${isoAFecha(post.map((x) => vv[x]).sort().pop())}): el último seguimiento no puede ser anterior.`, "mal");
+          el.value = textoFecha(vv[k]); el.focus(); return;
+        }
+      }
       val = iso;
     }
   } else if (val === "") val = null;
@@ -1588,8 +1758,8 @@ async function pLlave() {
 function valorActualTexto(it, v, caso) {
   if (it.codigo === "_diagnosticos") return caso ? diagnosticosTexto(caso) : "";
   const m = v[it.codigo];
-  if (m === NC) return "Desconocido";
-  if (m === DUDA) return "Duda";
+  if (m === NC) return it.tipoCampo === "fecha" ? "Desconocida (" + FECHA_NC + ")" : "Desconocido (-1)";
+  if (m === DUDA) return "Duda (?)";
   const f = (x) => (x ? " · " + isoAFecha(x) : "");
   switch (it.tipoCampo) {
     case "sino": case "sinofecha": return m === 1 ? "Sí" + f(v[it.codigo + "_date"]) : m === 0 ? "No" : "";
@@ -1771,7 +1941,10 @@ async function pExportar() {
     </div>
     <div class="grid g2">
       <div class="tarjeta pad"><h3>Descargar</h3><div class="sub" style="margin-bottom:16px">Una fila por paciente; columnas con los nombres del registro (en inglés). Sí = 1, No = 0, vacío = no consta.</div>
-        <label style="display:flex;gap:8px;align-items:center;margin-bottom:18px"><input type="checkbox" id="soloVal"> Solo casos validados</label>
+        <label style="display:flex;gap:8px;align-items:center;margin-bottom:12px"><input type="checkbox" id="soloVal"> Solo casos validados</label>
+        <label class="form" style="display:block;margin-bottom:18px">Los datos marcados como Desconocido
+          <select class="inp" id="expNC"><option value="blanco">en blanco (formato acordado hasta ahora)</option><option value="-1">como -1 (y las fechas como 0000-00-00)</option></select>
+          <span class="sub">La Duda va siempre en blanco. Confirme con el coordinador del registro qué formato admite antes de enviar con -1.</span></label>
         <div style="display:flex;gap:10px;flex-wrap:wrap"><a class="btn primario grande" id="dX" href="api/exportar/xlsx">${icono("exportar")} Excel (.xlsx)</a>
         <a class="btn grande" id="dC" href="api/exportar/csv">${icono("exportar")} CSV</a></div>
         <div class="aviso-local" style="margin-top:18px">${icono("info")}<div>El Excel incluye una segunda hoja <b>Solo_local_NO_ENVIAR</b> con las variables propias que no pide el registro (si las hay). Bórrela antes de enviar.</div></div>
@@ -1779,9 +1952,11 @@ async function pExportar() {
       <div class="tarjeta pad"><h3>Columnas</h3><div class="sub" style="margin-bottom:12px">${cols.registro.length} del registro${cols.local.length ? ` · <span style="color:var(--warn)">${cols.local.length} solo locales</span>` : ""}</div>
         <div class="cols-prev">${cols.registro.map((c) => `<span>${esc(c)}</span>`).join("")}${cols.local.map((c) => `<span class="local">${esc(c)}</span>`).join("")}</div></div>
     </div>`;
-  $("#soloVal").onchange = (e) => { const s = e.target.checked ? "?validados=1" : ""; $("#dX").href = "api/exportar/xlsx" + s; $("#dC").href = "api/exportar/csv" + s; };
+  const enlaces = () => { const s = "?" + new URLSearchParams({ ...($("#soloVal").checked ? { validados: 1 } : {}), ...($("#expNC").value === "-1" ? { desconocido: "-1" } : {}) });
+    $("#dX").href = "api/exportar/xlsx" + (s.length > 1 ? s : ""); $("#dC").href = "api/exportar/csv" + (s.length > 1 ? s : ""); };
+  $("#soloVal").onchange = enlaces; $("#expNC").onchange = enlaces;
   if (navegador()) {
-    for (const [id, f] of [["#dX", "xlsx"], ["#dC", "csv"]]) $(id).onclick = (ev) => { ev.preventDefault(); L.exportarRegistro($("#soloVal").checked, f); };
+    for (const [id, f] of [["#dX", "xlsx"], ["#dC", "csv"]]) $(id).onclick = (ev) => { ev.preventDefault(); L.exportarRegistro($("#soloVal").checked, f, $("#expNC").value); };
   }
 }
 
@@ -2012,7 +2187,7 @@ async function pDudas() {
   await cargarCasos();
   const filas = S.casos.flatMap((c) => c.dudas.map((d) => ({ c, d }))).sort((a, b) => a.c.numero - b.c.numero);
   const conNota = S.casos.filter(tieneNota).sort((a, b) => a.numero - b.numero);
-  $("#contenido").innerHTML = `<div class="aviso-local">${icono("bandera")}<div>Preguntas marcadas como <b>Duda</b> por quien introdujo los datos. Un caso con dudas abiertas <b>no se puede validar</b>.
+  $("#contenido").innerHTML = `<div class="aviso-local">${icono("duda")}<div>Preguntas marcadas como <b>Duda</b> por quien introdujo los datos. Un caso con dudas abiertas <b>no se puede validar</b>.
       Para resolverla, abra el caso y conteste Sí, No o Desconocido.</div></div>
     <div class="tarjeta">${filas.length ? `<table class="tabla"><thead><tr><th>Caso</th><th>Pregunta</th><th>Pestaña</th><th>Nota de la duda</th><th>Última modificación</th></tr></thead><tbody>
       ${filas.map(({ c, d }) => `<tr data-ir="#/caso/${c.numero}/${encodeURIComponent(d.pestana)}" style="--c:${ENFERMEDADES[c.principal]?.color}">

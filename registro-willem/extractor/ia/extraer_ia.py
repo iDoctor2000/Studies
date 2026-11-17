@@ -292,6 +292,21 @@ class Extraccion:
             propuestas["biological_sex"] = {"cambios": {"biological_sex_male": int(sexo == "hombre"), "biological_sex_female": int(sexo == "mujer")},
                                             "valor_texto": "Varón" if sexo == "hombre" else "Mujer", "cita": "Cabecera del informe",
                                             "avisos": [], "origen": "cabecera"}
+        # Raza: la deduce la fase 1 del nombre (que no sale del Mac); aquí solo llega la opción propuesta
+        raza, it_raza = pac.get("raza") or {}, self.por_codigo.get("race")
+        op_raza = next((o for o in (it_raza or {}).get("opciones", []) if o["codigo"] == raza.get("codigo")), None)
+        if op_raza:
+            propuestas["race"] = {"cambios": {o["codigo"]: int(o is op_raza) for o in it_raza["opciones"]}, "valor_texto": op_raza["texto"],
+                                  "cita": raza.get("motivo") or "Deducida del nombre", "origen": "nombre",
+                                  "avisos": [] if raza.get("por_defecto") else ["Deducida del nombre del paciente: compruébela"]}
+        # Ámbito asistencial: un informe de alta con fecha de ingreso es una hospitalización; sin ella, una consulta
+        hospital = bool(indice.get("fecha_ingreso"))
+        it_amb = self.por_codigo.get("patient_care_setting")
+        cod_amb = "patient_care_setting_inpatient" if hospital else "patient_care_setting_outpatient"
+        op_amb = next((o for o in (it_amb or {}).get("opciones", []) if o["codigo"] == cod_amb), None)
+        if op_amb:
+            propuestas["patient_care_setting"] = {"cambios": {o["codigo"]: int(o is op_amb) for o in it_amb["opciones"]}, "valor_texto": op_amb["texto"],
+                                                  "cita": "Informe de alta hospitalaria" if hospital else "Informe de consulta", "avisos": [], "origen": "cabecera"}
         basales = [it for it in preguntables(self.items) if it["pestana"] != "Seguimiento"]
         tandas = lotes(basales)
         for i, lote in enumerate(tandas, 1):
@@ -314,6 +329,16 @@ class Extraccion:
             progreso(f"    seguimiento: {len(reingresos)} reingreso(s)…")
             self.seguimiento(reingresos, propuestas)
         self.condiciones(propuestas, descartadas)
+        # Fechas de diagnóstico (criterio del equipo): en hospitalización, la fecha de ingreso del informe de alta;
+        # en consultas, la fecha del informe. No las pregunta la IA.
+        f_diag = indice.get("fecha_ingreso") or indice.get("fecha_informe") or indice.get("fecha_alta")
+        if f_diag:
+            for g in codigos_diag:
+                cod = DIAG.get(g, "") + "_diagnosis_date"
+                if g in DIAG and cod in self.por_codigo:
+                    propuestas[cod] = {"cambios": {cod: f_diag}, "valor_texto": "/".join(reversed(f_diag.split("-"))),
+                                       "cita": "Fecha de ingreso del informe de alta" if hospital else "Fecha del informe de consulta",
+                                       "avisos": [], "origen": "cabecera"}
         valores = {}
         for p in propuestas.values():
             valores.update(p["cambios"])
@@ -426,7 +451,8 @@ class Extraccion:
             quitar = []
             for k, p in propuestas.items():
                 it = self.por_codigo.get(k)
-                if not it or it["cond"](valores):
+                # lo que sale de la cabecera o del nombre (fechas de diagnóstico, raza…) no depende de lo que conteste la IA
+                if not it or p.get("origen") in ("cabecera", "nombre") or it["cond"](valores):
                     continue
                 # Si la condición es "prueba = 1" y nadie la ha contestado, pero hay resultados: se marca la prueba
                 m = re.fullmatch(r"\s*([a-z0-9_]+)\s*=\s*1\s*", it["condicion"])

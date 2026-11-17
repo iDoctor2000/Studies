@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import io
 import json
+import math
 import mimetypes
 import os
 import re
@@ -226,6 +227,9 @@ def iniciar_db():
         """)
         # Pistas clínicas para la IA escritas por el equipo (sustituyen a las del diccionario)
         con.execute("CREATE TABLE IF NOT EXISTS pistas_ia(codigo TEXT PRIMARY KEY, texto TEXT NOT NULL, autor TEXT, fecha TEXT)")
+        # Papelera: los casos eliminados se guardan enteros para que un data manager pueda recuperarlos
+        con.execute("""CREATE TABLE IF NOT EXISTS casos_borrados(
+            id INTEGER PRIMARY KEY, numero INTEGER NOT NULL, datos TEXT NOT NULL, borrado_por TEXT NOT NULL, fecha TEXT NOT NULL)""")
         # Fase 2 (IA local): propuestas de la IA y textos anonimizados de los informes
         cols = [r[1] for r in con.execute("PRAGMA table_info(casos)")]
         if "ia" not in cols:
@@ -397,6 +401,16 @@ def caso_a_dict(r, con_valores=True, con_informes=False):
 # ===========================================================================
 #  Propuestas de la IA local (misma lógica que web/js/ia.js)
 # ===========================================================================
+def eventos_posteriores(valores):
+    """Fechas de eventos del seguimiento posteriores a la fecha del último seguimiento (no debería haber ninguna)."""
+    fu = str(valores.get("follow_up_date") or "")
+    if not re.match(r"^\d{4}-\d{2}-\d{2}", fu):
+        return []
+    claves = [k for k in valores if k in ("death_date", "rehospitalization_hf_date", "rehospitalization_no_hf_date")
+              or (k.startswith("mace_") and k.endswith("_date"))]
+    return sorted(k for k in claves if re.match(r"^\d{4}-\d{2}-\d{2}", str(valores[k])) and str(valores[k])[:10] > fu[:10])
+
+
 def _tiene_valor(x):
     return x is not None and x != ""
 
@@ -580,8 +594,17 @@ def crear_xlsx(hojas):
     return buf.getvalue()
 
 
-def filas_exportacion(solo_local=False, solo_validados=False):
+FECHA_DESCONOCIDA = "0000-00-00"
+
+
+def filas_exportacion(solo_local=False, solo_validados=False, desconocido="blanco"):
+    """desconocido: "blanco" (por defecto) o "-1" (Desconocido = -1; en fechas, 0000-00-00). La Duda va siempre en blanco."""
     cols = columnas_exportacion(solo_local)
+    menos1 = desconocido == "-1"
+
+    def es_fecha(c):
+        f = campo.get(c) or {}
+        return c.endswith("_date") or str(f.get("tipo_formulario") or f.get("tipo") or "").startswith("date")
     if not solo_local:
         cab = cols  # exactamente las columnas del CRF original, en su orden
     else:
@@ -603,7 +626,7 @@ def filas_exportacion(solo_local=False, solo_validados=False):
                     v[cod] = 1 if G == g else 0
                 if g != "OTRO":
                     v.pop("other_disease", None)
-                aplicar_calculos(v)
+                preparar_valores(v, {"diagnosticos": diags, "creado": r["creado"]})
             fila = [r["numero"]] if solo_local else []
             v.setdefault("site_id", SITE_ID)
             v["site_id"], v["patient_id"] = SITE_ID, r["numero"]
@@ -613,6 +636,9 @@ def filas_exportacion(solo_local=False, solo_validados=False):
                     fila.append("")
                     continue
                 x = v.get(copias.get(c, c))
+                if menos1 and x == "NC":
+                    fila.append(FECHA_DESCONOCIDA if es_fecha(c) else -1)
+                    continue
                 if not solo_local and c.endswith("_date") and c[:-5] in conjunto:
                     # Fecha de un Sí/No: la fecha si la hay; 0 si está contestado; vacío si Desconocido/Duda/sin contestar
                     if x not in (None, "") and x not in MARCAS:
@@ -637,11 +663,144 @@ def _num(x):
         return x
 
 
-def aplicar_calculos(v):
+def _vacio(x):
+    return x is None or x == ""
+
+
+def _es_numero(x):
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
+def _redondear1(x):
+    """Redondeo a 1 decimal como Math.round de JavaScript (los .5 hacia arriba), para que web y servidor den lo mismo."""
+    return math.floor(x * 10 + 0.5) / 10
+
+
+def edad_en(nacimiento, fecha):
+    """Años cumplidos entre dos fechas AAAA-MM-DD."""
+    a = re.match(r"^(\d{4})-(\d{2})-(\d{2})", str(nacimiento or ""))
+    b = re.match(r"^(\d{4})-(\d{2})-(\d{2})", str(fecha or ""))
+    if not a or not b:
+        return None
+    e = int(b.group(1)) - int(a.group(1))
+    if b.group(2) + b.group(3) < a.group(2) + a.group(3):
+        e -= 1
+    return e if 0 <= e < 130 else None
+
+
+def _fn_mdrd(v, ctx):
+    """Filtrado glomerular MDRD-4 (IDMS): 175 × Cr^-1,154 × edad^-0,203 × 0,742 si mujer. Edad en la fecha de la analítica."""
+    cr = v.get("creatinine")
+    sexo = 0.742 if v.get("biological_sex_female") == 1 else (1 if v.get("biological_sex_male") == 1 else None)
+    if not _es_numero(cr) or cr <= 0 or sexo is None:
+        return None
+    diag = sorted(str(v[k]) for k in v if k.endswith("_diagnosis_date") and re.match(r"^\d{4}-", str(v[k])))
+    ref = next((f for f in (v.get("laboratory_biomarkers_test"), diag[0] if diag else None, ctx.get("creado"))
+                if re.match(r"^\d{4}-\d{2}-\d{2}", str(f or ""))), None)
+    edad = edad_en(v.get("dob"), ref)
+    if not edad:
+        return None
+    x = _redondear1(175 * cr ** -1.154 * edad ** -0.203 * sexo)
+    return int(x) if x == int(x) else x
+
+
+def _fn_sindrome_cardiorrenal(v, ctx):
+    """IC (diagnóstico del estudio o ingreso previo por IC) + (ERC o MDRD < 60)."""
+    previo = v.get("prior_heart_failure_hospitalization")
+    ic = 1 if ("IC" in (ctx.get("diagnosticos") or []) or previo == 1) else (0 if previo == 0 else ("NC" if previo == "NC" else "DUDA"))
+    # el filtrado se calcula aquí mismo: en el diccionario va después y aún no estaría hecho
+    erc, fg = v.get("chronic_kidney_disease"), _fn_mdrd(v, ctx)
+    if fg is None:
+        fg = v.get("glomerular_filtration_rate_mdrd")
+    renal = 1 if (erc == 1 or (_es_numero(fg) and fg < 60)) else (0 if erc == 0 else ("NC" if erc == "NC" else "DUDA"))
+    if ic == 1 and renal == 1:
+        return 1
+    if ic == 0 or renal == 0:
+        return 0
+    return "DUDA" if "DUDA" in (ic, renal) else "NC"
+
+
+FUNCIONES = {"mdrd": _fn_mdrd, "sindrome_cardiorrenal": _fn_sindrome_cardiorrenal}
+
+
+def cumple_condicion(texto, v):
+    """¿Se cumple "a = 1 O b = 1 Y c != 0"? (misma gramática que mostrar_solo_si)"""
+    c = str(texto or "").strip()
+    if not c:
+        return True
+
+    def igual(a, b):
+        if a is None:
+            return False
+        try:
+            return float(a) == float(b)
+        except (TypeError, ValueError):
+            return str(a) == str(b)
+
+    for parte in re.split(r"\s+O\s+", c, flags=re.I):
+        ok = True
+        for at in re.split(r"\s+Y\s+", parte, flags=re.I):
+            m = re.search(r"([a-z0-9_]+)\s*(=|!=)\s*(\S+)", at, re.I)
+            if not m:
+                continue
+            if igual(v.get(m.group(1)), m.group(3)) != (m.group(2) == "="):
+                ok = False
+                break
+        if ok:
+            return True
+    return False
+
+
+def _valor_regla(x):
+    try:
+        f = float(x)
+        return int(f) if f == int(f) else f
+    except ValueError:
+        return x
+
+
+def aplicar_defectos(v):
+    """Valores por defecto al exportar (columna valor_por_defecto): mismas reglas que registro.js."""
+    for f in diccionario()["campos"]:
+        d = str(f.get("valor_por_defecto") if f.get("valor_por_defecto") is not None else "").strip()
+        if not d:
+            continue
+        cod = str(f["codigo_variable"])
+        if "->" in d:
+            if not _vacio(v.get(cod)) and cumple_condicion(f.get("mostrar_solo_si"), v):
+                continue
+            for regla in d.split(";"):
+                m = re.search(r"([a-z0-9_]+)\s*=\s*(\S+)\s*->\s*(\S+)", regla, re.I)
+                if not m:
+                    continue
+                x = v.get(m.group(1))
+                txt = str(int(x)) if isinstance(x, float) and x == int(x) else str(x)
+                if x is not None and txt == m.group(2):
+                    v[cod] = _valor_regla(m.group(3))
+                    break
+        elif _vacio(v.get(cod)) and re.match(r"^s[ií]$", str(f.get("oculto") or "").strip(), re.I):
+            v[cod] = _valor_regla(d)
+    return v
+
+
+def preparar_valores(v, ctx):
+    """Valores listos para exportar: por defecto + calculados. ctx = {"diagnosticos": [...], "creado": iso}"""
+    aplicar_defectos(v)
+    return aplicar_calculos(v, ctx)
+
+
+def aplicar_calculos(v, ctx=None):
     """Campos calculados (columna 'calcular'): mismas reglas que web/js/registro.js."""
+    ctx = ctx or {}
     for f in diccionario()["campos"]:
         spec = str(f.get("calcular") or "").strip()
         if not spec:
+            continue
+        fn = re.match(r"^funcion:\s*([a-z0-9_]+)", spec, re.I)
+        if fn:
+            res = FUNCIONES[fn.group(1)](v, ctx) if fn.group(1) in FUNCIONES else None
+            if res is not None:
+                v[str(f["codigo_variable"])] = res
             continue
         reglas, _, extra = spec.partition("|")
         m_fecha = re.search(r"fecha:\s*([a-z0-9_]+)", extra, re.I)
@@ -1118,7 +1277,7 @@ class Manejador(BaseHTTPRequestHandler):
         u = self._usuario()
         num = int(p[0])
         b = self._cuerpo()
-        origen = b.get("origen") if b.get("origen") in ("formulario", "importacion", "relleno_no", "ia_revision") else "formulario"
+        origen = b.get("origen") if b.get("origen") in ("formulario", "importacion", "relleno_no", "ia_revision", "deshacer") else "formulario"
         with LOCK, db() as con:
             r = con.execute("SELECT * FROM casos WHERE numero=?", (num,)).fetchone()
             if not r:
@@ -1165,6 +1324,11 @@ class Manejador(BaseHTTPRequestHandler):
                     ia[k]["revisado"] = True
                     revisados.append(k)
             cambios += [("(IA revisado)", None, k) for k in revisados]
+            # Deshacer una confirmación en bloque: esos datos de la IA vuelven a estar pendientes
+            for k in b.get("ia_desrevisar") or []:
+                if k in ia and ia[k].get("revisado") and k not in revisados:
+                    ia[k]["revisado"] = False
+                    cambios.append(("(IA: revisión deshecha)", None, k))
             if b.get("estado") in ("borrador", "completo", "validado") and b["estado"] != estado:
                 if (b["estado"] == "validado" or estado == "validado") and u["rol"] not in REVISAN:
                     raise Error(403, "Solo un data manager o un cardiólogo revisor puede validar")
@@ -1172,6 +1336,8 @@ class Manejador(BaseHTTPRequestHandler):
                     raise Error(409, "No se puede validar: el caso tiene dudas sin resolver")
                 if b["estado"] == "validado" and ia_pendientes(ia, valores):
                     raise Error(409, f"No se puede validar: quedan {len(ia_pendientes(ia, valores))} datos de la IA sin revisar")
+                if b["estado"] == "validado" and eventos_posteriores(valores):
+                    raise Error(409, "No se puede validar: hay eventos con fecha posterior a la del último seguimiento")
                 cambios.append(("(estado)", estado, b["estado"]))
                 estado = b["estado"]
             if cambios:
@@ -1222,13 +1388,52 @@ class Manejador(BaseHTTPRequestHandler):
         self._json({"ok": True})
 
     def api_delete_casos(self, p, q):
-        u = self._usuario(rol="dm")
+        """Elimina un caso. Cualquier usuario puede eliminar un caso NO validado; uno validado, solo un data manager.
+        El caso se guarda entero en la papelera, de donde un data manager puede recuperarlo."""
+        u = self._usuario()
         num = int(p[0])
         with LOCK, db() as con:
+            r = con.execute("SELECT * FROM casos WHERE numero=?", (num,)).fetchone()
+            if not r:
+                raise Error(404, "Caso no encontrado")
+            if r["estado"] == "validado" and u["rol"] != "dm":
+                raise Error(403, "Caso validado: solo un data manager puede eliminarlo")
+            con.execute("INSERT INTO casos_borrados(numero,datos,borrado_por,fecha) VALUES(?,?,?,?)",
+                        (num, json.dumps(dict(r)), u["usuario"], ahora()))
             con.execute("DELETE FROM casos WHERE numero=?", (num,))
             con.execute("INSERT INTO auditoria(numero,usuario,fecha,campo,antes,despues,origen) VALUES(?,?,?,?,?,?,?)",
-                        (num, u["usuario"], ahora(), "(caso eliminado)", None, None, "formulario"))
+                        (num, u["usuario"], ahora(), "(caso eliminado)", r["estado"], None, "formulario"))
         self._json({"ok": True})
+
+    def api_get_papelera(self, p, q):
+        self._usuario(rol="dm")
+        with db() as con:
+            filas = con.execute("SELECT id, numero, datos, borrado_por, fecha FROM casos_borrados ORDER BY fecha DESC").fetchall()
+        out = []
+        for f in filas:
+            d = json.loads(f["datos"])
+            out.append({"id": f["id"], "numero": f["numero"], "principal": d.get("principal"), "secundarias": json.loads(d.get("secundarias") or "[]"),
+                        "estado": d.get("estado"), "borrado_por": f["borrado_por"], "fecha": f["fecha"]})
+        self._json(out)
+
+    def api_post_papelera(self, p, q):
+        """Recupera un caso de la papelera (solo data managers)."""
+        u = self._usuario(rol="dm")
+        b = self._cuerpo()
+        with LOCK, db() as con:
+            f = con.execute("SELECT * FROM casos_borrados WHERE id=?", (int(b.get("id") or 0),)).fetchone()
+            if not f:
+                raise Error(404, "Ese caso ya no está en la papelera")
+            if con.execute("SELECT 1 FROM casos WHERE numero=?", (f["numero"],)).fetchone():
+                raise Error(409, f"Ya existe otro caso con el número {f['numero']:04d}: no se puede recuperar encima")
+            d = json.loads(f["datos"])
+            cols = [c[1] for c in con.execute("PRAGMA table_info(casos)")]
+            d = {k: d[k] for k in cols if k in d}
+            con.execute(f"INSERT INTO casos({','.join(d)}) VALUES({','.join('?' * len(d))})", list(d.values()))
+            con.execute("DELETE FROM casos_borrados WHERE id=?", (f["id"],))
+            con.execute("INSERT INTO auditoria(numero,usuario,fecha,campo,antes,despues,origen) VALUES(?,?,?,?,?,?,?)",
+                        (f["numero"], u["usuario"], ahora(), "(caso recuperado de la papelera)", None, None, "formulario"))
+        self._json({"ok": True, "numero": f["numero"]})
 
     # ---- auditoría -----------------------------------------------------------
     def api_get_auditoria(self, p, q):
@@ -1247,7 +1452,8 @@ class Manejador(BaseHTTPRequestHandler):
         self._usuario(rol="dm")
         fmt = p[0] if p else "xlsx"
         solo_val = (q.get("validados") or ["0"])[0] == "1"
-        reg = filas_exportacion(False, solo_val)
+        desc = "-1" if (q.get("desconocido") or [""])[0] == "-1" else "blanco"
+        reg = filas_exportacion(False, solo_val, desc)
         loc = filas_exportacion(True, solo_val)
         sello = dt.datetime.now().strftime("%Y%m%d_%H%M")
         if fmt == "csv":

@@ -188,7 +188,22 @@ def main():
     ok(not os.path.exists(os.path.join(priv, "pendientes_de_revisar", "caso_0001_ingreso_2025-01-10.json")), "y desaparece de 'pendientes'")
     d = json.load(open(os.path.join(sal, "listos", "caso_0001_ingreso_2025-01-10.json"), encoding="utf-8"))
     ok("Arcedo" not in d["texto"] and "Lucinda" not in d["texto"], "los nombres marcados ya no aparecen")
-    ok(d["paciente"] == {"sexo": "Hombre", "fecha_nacimiento": "1950-02-02", "edad": 74} and d["numero_caso"] == 1, "datos del caso en el JSON")
+    pac = dict(d["paciente"])
+    raza_json = pac.pop("raza", None)
+    ok(pac == {"sexo": "Hombre", "fecha_nacimiento": "1950-02-02", "edad": 74} and d["numero_caso"] == 1, "datos del caso en el JSON")
+    ok(raza_json == {"codigo": "racial_group_hispanic", "motivo": "Valor por defecto: el nombre no sugiere otro origen", "por_defecto": True},
+       "raza por defecto (Hispana / latina) cuando el nombre no sugiere otra")
+    ok(set(d["paciente"]) == {"sexo", "fecha_nacimiento", "edad", "raza"} and set(raza_json) == {"codigo", "motivo", "por_defecto"},
+       "con la raza solo viajan la opción y el motivo, nunca el nombre")
+    import raza
+    casos_raza = [(("MOHAMED", "EL INVENTADO", ""), "racial_group_caucasian"), (("WEI", "CHEN", ""), "racial_group_asian_race"),
+                  (("MAMADOU", "DIALLO", ""), "racial_group_african_race"), (("JOHN", "SMITH", ""), "racial_group_caucasian"),
+                  (("JOSÉ ANTONIO", "GARCÍA", "LÓPEZ"), "racial_group_hispanic"), (("FÁTIMA", "MARTÍNEZ", "RUIZ"), "racial_group_hispanic"),
+                  (("OMAR", "BENÍTEZ", "DEL RÍO"), "racial_group_hispanic")]
+    mal = [n for n, esperado in casos_raza if raza.inferir(*n)["codigo"] != esperado]
+    ok(not mal, f"raza deducida del nombre en {len(casos_raza)} ejemplos inventados" + (f" — FALLAN: {mal}" if mal else ""))
+    ok(all(not any(t in raza.inferir(*n)["motivo"].upper() for t in " ".join(n).split() if len(t) > 3) for n, _ in casos_raza),
+       "el motivo de la raza nunca incluye el nombre")
     ok([s["titulo"] for s in d["secciones"]][:3] == ["MOTIVO DE INGRESO", "ANTECEDENTES", "EXPLORACIÓN FÍSICA"], "texto separado por secciones")
 
     print("\n5) Libro llave")

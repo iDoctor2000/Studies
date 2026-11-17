@@ -50,13 +50,17 @@ código del móvil.
 
 - **Casos** → abra un caso → rellene las pestañas. Se guarda solo.
 - Botón **Modo Vintage** (arriba a la derecha, dentro del caso): más variables por pantalla y manejo
-  con teclado (`S` Sí, `N` No, `?` Desconocido, `D` Duda). Necesita pantalla de portátil o de escritorio.
+  con teclado (`S` Sí, `N` No, `-` Desconocido, `?` Duda). Necesita pantalla de portátil o de escritorio.
 - Los datos con la marca morada **IA** los ha propuesto la inteligencia artificial a partir del
   informe. Pulse la marca para ver la frase del informe y:
   - **«Es correcto»** si coincide,
   - corríjalo si no,
   - **«Ver en el informe»** para leer el texto completo (ya sin datos personales).
-- Si no está segura de un dato, márquelo como **Duda** (bandera): lo verá un cardiólogo.
+- **Desconocido** (lo he buscado y no consta) es el botón **-1**; en un número se escribe `-1` y en una fecha `00/00/0000`.
+- Si no está segura de un dato, márquelo como **Duda** (botón **?**): lo verá un cardiólogo.
+- La **i** junto a cada pregunta muestra su definición completa.
+- Tras «Marcar el resto como No», «Resto: Desconocido» o «Confirmar lo de la IA» aparece **Deshacer**, por si fue un error.
+- Un caso repetido o creado por error se puede **Eliminar** (arriba, dentro del caso) mientras no esté validado.
 - Cuando el caso esté completo, cambie el estado a **Completo**.
 - Un caso **validado** ya no se puede modificar.
 
@@ -64,7 +68,7 @@ código del móvil.
 
 Todo lo anterior y, además:
 
-- **Dudas**: lista de las preguntas marcadas con bandera por el personal, para resolverlas.
+- **Dudas**: lista de las preguntas marcadas como Duda (?) por el personal, para resolverlas.
 - **Revisar lo de la IA** (botón del Panel): abre la lista de casos con datos de la IA por revisar.
   Entre en el primero y vaya pasando con **Siguiente paciente** y **Paciente anterior** (arriba y
   abajo de cada caso); se mantiene la pestaña en la que esté. Las flechas recorren la lista tal como

@@ -218,9 +218,9 @@ variables a la vista.
 
 - **Solo en pantallas de escritorio** (ventana de al menos 1200 píxeles de ancho). En el móvil, en
   una tableta o con la ventana estrecha se usa siempre el modo normal.
-- Botones pequeños **NO · SÍ · ¿? · bandera** (¿? = Desconocido, bandera = Duda). Pulsar otra vez el
+- Botones pequeños **NO · SÍ · -1 · ?** (-1 = Desconocido, ? = Duda). Pulsar otra vez el
   botón marcado deja la pregunta sin contestar.
-- **Teclado**, con el cursor en una pregunta: `S` Sí, `N` No, `?` Desconocido, `D` Duda; salta sola
+- **Teclado**, con el cursor en una pregunta: `S` Sí, `N` No, `-` Desconocido, `?` (o `D`) Duda; salta sola
   a la siguiente. `Tab`, `↓` y `↑` para moverse.
 - Un punto ámbar marca lo que falta. Al dejar el ratón sobre una pregunta se ve su ayuda y su código.
 - Los datos, las reglas, el guardado automático, la revisión de la IA y el Excel final son
@@ -270,6 +270,38 @@ validados nunca cambian. Después se vuelve al paso 1 para ver si el acierto ha 
 Por línea de comandos: `extraer_ia.py --variables resting_heart_rate,echocardiography_lvef` y
 `--pistas archivo.json`.
 
+## Formulario: quinta ronda de cambios (nov-2026)
+
+- **Pestañas**: Diagnósticos · Datos del paciente y antecedentes · Procedimientos diagnósticos y dispositivos · Seguimiento.
+  No se muestran el identificador del centro, el número de caso ni los criterios de elegibilidad (sí van al Excel).
+- **Desconocido se ve como `-1`** y **Duda como `?`**. En un número, escribir `-1` lo deja como Desconocido; en una fecha,
+  `00/00/0000`. Por dentro siguen siendo las marcas de siempre: en el Excel van **en blanco**, salvo que al exportar se
+  elija «Desconocido como -1» (entonces `-1` y, en las fechas, `0000-00-00`; la Duda va siempre en blanco).
+- **Resto: Desconocido** rellena también los números (`-1`) y las fechas (`00/00/0000`) que estén sin contestar.
+- **Deshacer**: tras «Confirmar lo de la IA», «Resto: Desconocido» o «Marcar el resto como No» aparece un aviso con el botón
+  «Deshacer». Devuelve solo lo que tocó esa orden; lo que se haya cambiado después a mano se respeta.
+- **Información de cada variable**: la `i` junto al nombre abre su ficha (definición completa, cómo se contesta, opciones,
+  cuándo se pregunta, código y columnas del Excel).
+- **Historia cardiovascular** en el orden pedido; enfermedad coronaria y valvulopatía pasan a ese apartado; ictus/AIT y
+  esperanza de vida < 24 meses, a Comorbilidades. «Síncope de causa no aclarada» solo se pregunta si hubo síncope; si no, es No.
+  Fibrilación ventricular y TV polimórfica se preguntan una vez y rellenan las dos columnas del Excel.
+- **Se calculan solos** (misma fórmula en la web y en el servidor):
+  - *Filtrado glomerular MDRD* = 175 × creatinina^-1,154 × edad^-0,203 × 0,742 si es mujer (edad en la fecha de la analítica;
+    si no la hay, en la del diagnóstico). Se ve en el formulario, pero no se escribe.
+  - *Síndrome cardiorrenal* (no se muestra): **Sí** si hay insuficiencia cardiaca (diagnóstico del estudio o ingreso previo
+    por IC) y enfermedad renal crónica o MDRD < 60; **No** si falta alguna de las dos; **Duda** si alguna está sin contestar
+    y **Desconocido** si está marcada como desconocida.
+- **Seguimiento**: botón **Hoy** en la fecha del último seguimiento (última fecha en la que sabemos que el paciente está
+  vivo). Ningún evento puede tener una fecha posterior: el formulario no lo acepta y el caso no se puede validar así.
+- **Eliminar un caso**: botón «Eliminar» dentro del caso. Cualquier usuario puede eliminar un caso **no validado** (pide
+  escribir el número para confirmar); uno validado, solo un data manager. El caso queda en la **Papelera** (en «Casos»,
+  solo data manager), de donde se puede recuperar.
+- **IA (Mac)**: las fechas de diagnóstico se ponen solas (fecha de ingreso del informe de alta; en un informe de consulta,
+  la del informe); el ámbito asistencial, también. La **raza** se deduce del nombre en la fase 1, dentro del Mac (el nombre
+  no se guarda): si no sugiere otro origen, «Hispana / latina». El CRF no tiene la opción «Árabe»: se propone «Caucásica»
+  con un aviso (se cambia en `extractor/raza.py`). La esperanza de vida < 24 meses la estima la IA con su criterio.
+  Los informes ya anonimizados antes de este cambio no llevan la raza: hay que volver a anonimizarlos.
+
 ## Pasar de un paciente a otro
 
 Dentro de un caso, arriba y abajo, hay una tira con **Paciente anterior** · posición («3 de 27») ·
@@ -282,9 +314,9 @@ acceso directo **Revisar lo de la IA**. Funciona igual en modo normal y en Modo 
 
 | Perfil | Qué puede hacer |
 |---|---|
-| **Introducción de datos** | crear y rellenar casos (modo normal y Modo Vintage); un caso validado le queda en solo lectura |
+| **Introducción de datos** | crear y rellenar casos (modo normal y Modo Vintage) y eliminar casos no validados; un caso validado le queda en solo lectura |
 | **Cardiólogo revisor** | además revisa, corrige y valida casos, ve la Auditoría de la IA y escribe pistas clínicas |
-| **Data manager** | todo: además importa de la IA, exporta, borra casos y gestiona usuarios |
+| **Data manager** | todo: además importa de la IA, exporta, gestiona usuarios, elimina casos validados y recupera casos de la papelera |
 
 Se eligen en **Usuarios** (al dar de alta o con «Cambiar rol»). Las bases creadas con versiones
 anteriores se actualizan solas al arrancar.

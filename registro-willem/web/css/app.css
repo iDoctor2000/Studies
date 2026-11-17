@@ -837,3 +837,36 @@ kbd { font: 600 11px/1 var(--mono); padding: 2px 5px; border-radius: 5px; border
 .cab-aud { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cambio-aud { font-size: 14px; } .cambio-aud del { color: var(--bad); } .cambio-aud ins { color: var(--ok); text-decoration: none; font-weight: 700; }
 .lista-aud .cita-ia { font-size: 13px; }
+
+/* ===== 5ª ronda de Sergio: Desconocido = -1, Duda = ?, información, deshacer, eliminar ===== */
+.g-nc { font: 800 12px/1 var(--mono); letter-spacing: -.5px; }
+.mb .g-nc { font-size: 12.5px; }
+.nota-nc { font-size: 12px; color: var(--ink-3); font-weight: 600; margin-left: 4px; }
+.info-var { margin-left: 2px; flex: none; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--line-2); background: none; color: var(--ink-3);
+  font: italic 700 11.5px/1 Georgia, "Times New Roman", serif; cursor: pointer; display: inline-grid; place-items: center; padding: 0; }
+.info-var:hover, .vi:hover { color: var(--brand); border-color: var(--brand); }
+.vi { flex: none; width: 13px; height: 13px; border-radius: 50%; border: 1px solid var(--line-2); background: none; color: var(--ink-3);
+  font: italic 700 9px/1 Georgia, "Times New Roman", serif; cursor: pointer; display: inline-grid; place-items: center; padding: 0; opacity: .55; }
+.vf:hover .vi, .vf:focus-within .vi { opacity: 1; }
+.info-var-ficha { margin: 0; display: grid; grid-template-columns: minmax(110px, 30%) 1fr; gap: 9px 14px; font-size: 14px; }
+.info-var-ficha dt { color: var(--ink-3); font-weight: 600; font-size: 12.5px; padding-top: 2px; }
+.info-var-ficha dd { margin: 0; overflow-wrap: anywhere; }
+.info-var-ficha code { font: 12px var(--mono); background: var(--surface-2); border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; }
+.info-ops { margin: 0; padding-left: 18px; } .info-ops li { margin: 2px 0; }
+@media (max-width: 560px) { .info-var-ficha { grid-template-columns: 1fr; gap: 2px 0; } .info-var-ficha dd { margin-bottom: 8px; } }
+.banda-deshacer { display: flex; align-items: center; gap: 10px; padding: 9px 12px 9px 14px; margin: 0 0 14px; border-radius: 12px;
+  background: var(--surface-2); border: 1px solid var(--line-2); font-size: 14px; }
+.banda-deshacer > .ico { width: 17px; height: 17px; color: var(--ink-3); flex: none; }
+.banda-deshacer span { flex: 1; min-width: 0; }
+.banda-deshacer .cerrar-x { background: none; border: 0; color: var(--ink-3); cursor: pointer; padding: 4px; border-radius: 7px; display: inline-grid; }
+.banda-deshacer .cerrar-x .ico { width: 15px; height: 15px; }
+.vintage .banda-deshacer { padding: 5px 8px 5px 10px; margin-bottom: 6px; font-size: 12.5px; border-radius: 9px; }
+.fijo.calc { font-family: inherit; font-weight: 500; color: var(--ink-2); }
+.fijo.calc b { font-family: var(--mono); color: var(--ink); font-size: 15px; }
+.v-calc { color: var(--ink); }
+.vseg + .vm.hoy, .vm.hoy { height: 22px; padding: 0 7px; margin-left: 4px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--surface); color: var(--ink-2);
+  font: 600 11px/1 inherit; cursor: pointer; }
+.vm.hoy:hover { border-color: var(--brand); color: var(--brand); }
+.btn.peligro-suave { color: var(--bad); }
+.btn.peligro-suave:hover { background: var(--bad-soft, rgba(220, 38, 38, .1)); }
+.cajon .lista-aud li { display: flex; align-items: center; gap: 10px; justify-content: space-between; }

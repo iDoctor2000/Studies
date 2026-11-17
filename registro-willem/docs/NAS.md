@@ -171,9 +171,9 @@ paso 2.5): allí mandan las reglas de acceso de Tailscale.
 
    | Perfil | Para quién | Qué puede hacer |
    |---|---|---|
-   | **Introducción de datos** | personal que mete casos | crear y rellenar casos (modo normal y Modo Vintage); no puede tocar un caso ya validado |
+   | **Introducción de datos** | personal que mete casos | crear y rellenar casos (modo normal y Modo Vintage) y eliminar casos no validados; no puede tocar un caso ya validado |
    | **Cardiólogo revisor** | cardiólogos que revisan | lo anterior y además revisar, corregir y **validar** casos, ver la **Auditoría de la IA** y escribir pistas clínicas |
-   | **Data manager** | quien administra el registro | todo: además **importa de la IA**, exporta el Excel, borra casos y gestiona usuarios |
+   | **Data manager** | quien administra el registro | todo: además **importa de la IA**, exporta el Excel, gestiona usuarios, elimina casos validados y recupera casos de la papelera |
 
    Solo el data manager puede importar de la IA, y además hace falta la Estación del Mac, que es
    donde están las propuestas. Lo recomendable es que haya un único data manager.

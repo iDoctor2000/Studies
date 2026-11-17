@@ -37,6 +37,7 @@ sys.path.insert(0, AQUI)
 sys.path.insert(0, os.path.dirname(AQUI))  # para servidor.py (lector/escritor de Excel)
 
 from anonimizar import anonimizar_informe, separar_secciones  # noqa: E402
+import raza
 from leer_pdf import InformeNoValido, leer_informe  # noqa: E402
 from llave import ConflictoLlave, Llave  # noqa: E402
 
@@ -162,7 +163,9 @@ def procesar(pdfs, privado, salida, usuario="extractor", progreso=None):
                     "fecha_ingreso": c["fecha_ingreso"],
                     "fecha_alta": c["fecha_alta"],
                     "servicio": c["servicio"],
-                    "paciente": {"sexo": c["sexo"], "fecha_nacimiento": c["fecha_nacimiento"], "edad": c["edad"]},
+                    # la raza se deduce aquí, del nombre, porque es el único momento en que se conoce: el nombre no se guarda
+                    "paciente": {"sexo": c["sexo"], "fecha_nacimiento": c["fecha_nacimiento"], "edad": c["edad"],
+                                 "raza": raza.inferir(c.get("nombre"), c.get("apellido1"), c.get("apellido2"))},
                     "titulo": inf["titulo"],
                     "paginas": inf["paginas"],
                     "secciones": separar_secciones(an["texto"]),
